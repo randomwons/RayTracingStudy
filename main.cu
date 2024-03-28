@@ -139,16 +139,16 @@ int main(){
     uchar3* d_pixelBuffer;
     cudaMalloc(&d_pixelBuffer, sizeof(uchar3) * WINDOW_WIDTH * WINDOW_HEIGHT);
 
-    Ray* rays;
-    cudaMalloc(&rays, sizeof(Ray) * WINDOW_WIDTH * WINDOW_HEIGHT);
+    Ray* d_rays;
+    cudaMalloc(&d_rays, sizeof(Ray) * WINDOW_WIDTH * WINDOW_HEIGHT);
 
     float3* d_frame;
     cudaMalloc(&d_frame, sizeof(float3) * WINDOW_WIDTH * WINDOW_HEIGHT);
 
     while(!glfwWindowShouldClose(window)) {
         
-        generateRays<<<blockLayout, threadLayout>>>(rays, WINDOW_WIDTH, WINDOW_HEIGHT);
-        traceRays<<<blockLayout, threadLayout>>>(rays, d_frame, WINDOW_WIDTH, WINDOW_HEIGHT);
+        generateRays<<<blockLayout, threadLayout>>>(d_rays, WINDOW_WIDTH, WINDOW_HEIGHT);
+        traceRays<<<blockLayout, threadLayout>>>(d_rays, d_frame, WINDOW_WIDTH, WINDOW_HEIGHT);
         FrameKernel<<<blockLayout, threadLayout>>>(d_pixelBuffer, d_frame, WINDOW_WIDTH, WINDOW_HEIGHT);
     
         void *d_ptr = nullptr;
@@ -172,8 +172,10 @@ int main(){
         glfwSwapBuffers(window);
     }
 
+    cudaFree(d_frame);
+    cudaFree(d_rays);
     cudaFree(d_pixelBuffer);
-
+    
     //
 
     glfwTerminate();
