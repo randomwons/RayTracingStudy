@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cmath>
 
 #include "glad/glad.h"
 #include "GLFW/glfw3.h"
@@ -9,6 +10,8 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <cuda_gl_interop.h>
+
+#define PI 3.141592653589793f
 
 constexpr GLuint WINDOW_WIDTH = 1920;
 constexpr GLuint WINDOW_HEIGHT = 1080;
@@ -28,22 +31,26 @@ __device__ float3 color(const Ray& r) {
     return make_float3(1.0f-t + 0.5 * t, 1.0f-t + 0.7 * t, 1.0f-t + 1.0 * t);
 }
 
-__global__ void generateRays(Ray* rays, int width, int height) {
+__global__ void generateRays(Ray* rays, float vFov, int width, int height) {
 
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if(x < width && y < height){
         int pid = y * width + x;
 
-        float normX = (x - width / 2.0f);
-        float normY = (y - height / 2.0f);
-
         Ray ray;
         ray.origin = {0, 0, 0};
-        ray.dir = {normX, normY, 1.0f};
-        ray.dir = normalize(ray.dir);
-        rays[pid] = ray;
 
+        float aspectRatio = (float)width / (float)height;
+        float vFovRad = vFov * (PI / 180);
+        float vh = 2 * tanf(vFovRad / 2);
+        float vw = vh * aspectRatio;
+
+        float dirX = (float)x / (float)width * vw - 0.5 * vw;
+        float dirY = (float)y / (float)height * vh - 0.5 * vh;
+        ray.dir = {dirX, dirY, -1};
+        
+        rays[pid] = ray;
     }
 
 }
@@ -111,10 +118,15 @@ int main(){
     glOrtho(0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
 
 
-    uint32_t threadLayoutX = 2;
-    uint32_t threadLayoutY = 16;
-    uint32_t blockLayoutX = (WINDOW_WIDTH - threadLayoutX + 1) / threadLayoutX;
-    uint32_t blockLayoutY = (WINDOW_HEIGHT - threadLayoutY + 1) / threadLayoutY;
+    // uint32_t threadLayoutX = 2;
+    // uint32_t threadLayoutY = 16;
+    // uint32_t blockLayoutX = (WINDOW_WIDTH - threadLayoutX + 1) / threadLayoutX;
+    // uint32_t blockLayoutY = (WINDOW_HEIGHT - threadLayoutY + 1) / threadLayoutY;
+
+    uint32_t threadLayoutX = 8;
+    uint32_t threadLayoutY = 8;
+    uint32_t blockLayoutX = WINDOW_WIDTH / threadLayoutX + 1;
+    uint32_t blockLayoutY = WINDOW_HEIGHT / threadLayoutY + 1;
     dim3 threadLayout = dim3(threadLayoutX, threadLayoutY);
     dim3 blockLayout = dim3(blockLayoutX, blockLayoutY);
 
@@ -145,9 +157,11 @@ int main(){
     float3* d_frame;
     cudaMalloc(&d_frame, sizeof(float3) * WINDOW_WIDTH * WINDOW_HEIGHT);
 
+    float vFov = 90;
+
     while(!glfwWindowShouldClose(window)) {
         
-        generateRays<<<blockLayout, threadLayout>>>(d_rays, WINDOW_WIDTH, WINDOW_HEIGHT);
+        generateRays<<<blockLayout, threadLayout>>>(d_rays, vFov, WINDOW_WIDTH, WINDOW_HEIGHT);
         traceRays<<<blockLayout, threadLayout>>>(d_rays, d_frame, WINDOW_WIDTH, WINDOW_HEIGHT);
         FrameKernel<<<blockLayout, threadLayout>>>(d_pixelBuffer, d_frame, WINDOW_WIDTH, WINDOW_HEIGHT);
     
