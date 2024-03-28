@@ -14,18 +14,62 @@ constexpr GLuint WINDOW_WIDTH = 1920;
 constexpr GLuint WINDOW_HEIGHT = 1080;
 constexpr const char* WINDOW_TITLE = "Ray Tracing Study";
 
-__global__ void FrameKernel(uchar3* frame, int width, int height) {
+struct Ray {
+    float3 origin, dir;
+};
+
+__device__ float3 normalize(float3 v){
+    float invLen = rsqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    return make_float3(v.x * invLen, v.y * invLen, v.z * invLen);
+}
+
+__device__ float3 color(const Ray& r) {
+    float t = 0.5f*(r.dir.y + 1.0f);
+    return make_float3(1.0f-t + 0.5 * t, 1.0f-t + 0.7 * t, 1.0f-t + 1.0 * t);
+}
+
+__global__ void generateRays(Ray* rays, int width, int height) {
+
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if(x < width && y < height){
         int pid = y * width + x;
-        frame[pid] = {static_cast<unsigned char>((static_cast<float>(x) / width) * 255.0f), 
-                     static_cast<unsigned char>((static_cast<float>(y) / height) * 255.0f),
-                     100};
+
+        float normX = (x - width / 2.0f);
+        float normY = (y - height / 2.0f);
+
+        Ray ray;
+        ray.origin = {0, 0, 0};
+        ray.dir = {normX, normY, 1.0f};
+        ray.dir = normalize(ray.dir);
+        rays[pid] = ray;
+
+    }
+
+}
+
+__global__ void traceRays(Ray* rays, float3* frame, int width, int height) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if(x < width && y < height) {
+        int pid = y * width + x;
+        frame[pid] = color(rays[pid]);
     }
 }
 
 
+__global__ void FrameKernel(uchar3* result, float3* frame, int width, int height) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if(x < width && y < height){
+        int pid = y * width + x;
+        result[pid] = {
+            static_cast<unsigned char>(__saturatef(frame[pid].x) * 255.0f),
+            static_cast<unsigned char>(__saturatef(frame[pid].y) * 255.0f),
+            static_cast<unsigned char>(__saturatef(frame[pid].z) * 255.0f)
+        };
+    }
+}
 
 int main(){
 
@@ -36,10 +80,11 @@ int main(){
         return EXIT_FAILURE;
     }
 
+    // TODO: I don't know why it doesn't work
     // glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     // glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     // glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-
+    
     auto window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE, nullptr, nullptr);
     if(!window) {
         printf("Failed to create glfw window\n");
@@ -65,10 +110,6 @@ int main(){
     glLoadIdentity();
     glOrtho(0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
 
-    // 
-
-    uchar3* d_pixelBuffer;
-    cudaMalloc(&d_pixelBuffer, sizeof(uchar3) * WINDOW_WIDTH * WINDOW_HEIGHT);
 
     uint32_t threadLayoutX = 2;
     uint32_t threadLayoutY = 16;
@@ -94,9 +135,21 @@ int main(){
     glBufferData(GL_PIXEL_UNPACK_BUFFER, size * sizeof(GLubyte), NULL, GL_DYNAMIC_COPY);
     cudaGLRegisterBufferObject(pbo);
 
-    while(!glfwWindowShouldClose(window)) {
 
-        FrameKernel<<<blockLayout, threadLayout>>>(d_pixelBuffer, WINDOW_WIDTH, WINDOW_HEIGHT);
+    uchar3* d_pixelBuffer;
+    cudaMalloc(&d_pixelBuffer, sizeof(uchar3) * WINDOW_WIDTH * WINDOW_HEIGHT);
+
+    Ray* rays;
+    cudaMalloc(&rays, sizeof(Ray) * WINDOW_WIDTH * WINDOW_HEIGHT);
+
+    float3* d_frame;
+    cudaMalloc(&d_frame, sizeof(float3) * WINDOW_WIDTH * WINDOW_HEIGHT);
+
+    while(!glfwWindowShouldClose(window)) {
+        
+        generateRays<<<blockLayout, threadLayout>>>(rays, WINDOW_WIDTH, WINDOW_HEIGHT);
+        traceRays<<<blockLayout, threadLayout>>>(rays, d_frame, WINDOW_WIDTH, WINDOW_HEIGHT);
+        FrameKernel<<<blockLayout, threadLayout>>>(d_pixelBuffer, d_frame, WINDOW_WIDTH, WINDOW_HEIGHT);
     
         void *d_ptr = nullptr;
         cudaGLMapBufferObject((void**)&d_ptr, pbo);
