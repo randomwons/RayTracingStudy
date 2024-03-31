@@ -5,33 +5,51 @@
 
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
+#include <curand_kernel.h>
 
 constexpr uint32_t WINDOW_WIDTH = 1280;
 constexpr uint32_t WINDOW_HEIGHT = 720;
 constexpr const char* WINDOW_TITLE = "CUDA-OpenGL Interop Test";
 
 // RANDOM IMAGE
-constexpr uint32_t IMAGE_WIDTH = 1280;
-constexpr uint32_t IMAGE_HEIGHT = 720;
+constexpr uint32_t IMAGE_WIDTH = 1920;
+constexpr uint32_t IMAGE_HEIGHT = 1080;
+constexpr uint32_t IMAGE_CHANNEL = 4;
 
 const char* vertexShaderSource = 
     "#version 330 core\n"
     "layout (location = 0) in vec3 aPos;\n"
     "layout (location = 1) in vec2 aTexCoord;\n"
+    "out vec2 TexCoord;\n"
     "void main() {\n"
-    "   gl_Position = vec4(aPos, 1);\n"
+    "   gl_Position = vec4(aPos, 1.0);\n"
     "   TexCoord = aTexCoord;\n"
     "}\0";
 
-const char* fragmentShaderSource =
+const char* fragmentShaderSource = 
     "#version 330 core\n"
-    "out vec4 fragColor;"
+    "out vec4 fragColor;\n"
     "in vec2 TexCoord;\n"
     "uniform sampler2D texture1;\n"
     "void main() {\n"
     "   fragColor = texture(texture1, TexCoord);\n"
     "}\0";
 
+__global__ void generateRandomImage(uchar4* data, int width, int height) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if(x >= width || y >= height) return;
+
+    int pid = y * width + x;
+    curandState state;
+    curand_init((unsigned long long)clock() + pid, 0, 0, &state);
+    data[pid] = make_uchar4(
+        curand_uniform(&state) * 255,
+        curand_uniform(&state) * 255,
+        curand_uniform(&state) * 255,
+        255
+    );
+}
 
 enum Mode {
     CPU,
@@ -50,10 +68,16 @@ int main(int argc, char* argv[]){
     Mode mode;
     if(strcmp(argv[1], "--cpu") == 0) {
         mode = CPU;
+        printf("Mode CPU\n");
     } else if (strcmp(argv[1], "--cuda") == 0) {
         mode = CUDA;
+        printf("Mode CUDA\n");
     } else if (strcmp(argv[1], "--cuda-opengl") == 0) {
         mode = CUDA_OPENGL;
+        printf("Mode CUDA-OpenGL Interop\n");
+    } else {
+        printf("Usage : mode <--cpu, --cuda, --cuda-opengl>\n");
+        return EXIT_FAILURE;
     }
 
     if(!glfwInit()){
@@ -81,13 +105,31 @@ int main(int argc, char* argv[]){
     auto glVersion = glGetString(GL_VERSION);
     printf("OPENGL CONTEXT VERSION : %s\n", glVersion);
 
+    int success;
     uint32_t vertexShader = glCreateShader(GL_VERTEX_SHADER);
     uint32_t fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
 
     glShaderSource(vertexShader, 1, &vertexShaderSource, nullptr);
     glCompileShader(vertexShader);
+    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+    if(!success){
+        char infoLog[1024];
+        glGetShaderInfoLog(vertexShader, 1024, nullptr, infoLog);
+        printf("Failed to compile vertex shader\n");
+        printf("reason : %s\n", infoLog);
+        return EXIT_FAILURE;
+    }
     glShaderSource(fragmentShader, 1, &fragmentShaderSource, nullptr);
     glCompileShader(fragmentShader);
+    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+    if(!success){
+        char infoLog[1024];
+        glGetShaderInfoLog(fragmentShader, 1024, nullptr, infoLog);
+        printf("Failed to compile vertex shader\n");
+        printf("reason : %s\n", infoLog);
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
 
     uint32_t shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
@@ -122,34 +164,106 @@ int main(int argc, char* argv[]){
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMAGE_WIDTH, IMAGE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
-    uint8_t* imageCPU;
+    uchar4* imageCPU;
     uchar4* imageCUDA;
-    cudaGraphicsResource_t cudaResource;
+    cudaGraphicsResource *cudaResource;
     uint32_t pbo;
     
     if(mode == Mode::CPU) {
-        imageCPU = new uint8_t[IMAGE_WIDTH * IMAGE_HEIGHT * 4];
+        imageCPU = new uchar4[IMAGE_WIDTH * IMAGE_HEIGHT];
     } else if (mode == Mode::CUDA) {
+        imageCPU = new uchar4[IMAGE_WIDTH * IMAGE_HEIGHT];
+        cudaMalloc((void**)&imageCUDA, sizeof(uchar4) * IMAGE_WIDTH * IMAGE_HEIGHT);
+    } else if (mode == Mode::CUDA_OPENGL) {
+        glGenBuffers(1, &pbo);
+        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+        glBufferData(GL_PIXEL_UNPACK_BUFFER, IMAGE_WIDTH * IMAGE_HEIGHT * IMAGE_CHANNEL, NULL, GL_DYNAMIC_COPY);
+        cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone);
+    }
 
-    } else if 
-
-
-
-
-
-
-
-
-
+    double deltaTime = 0;
+    double lastFrameTime = 0;
+    double currentFrameTime = 0;
+    int frames = 0;
     while(!glfwWindowShouldClose(window)){
+
+        currentFrameTime = glfwGetTime();
+        deltaTime = currentFrameTime - lastFrameTime;
+        lastFrameTime = currentFrameTime;
+        frames++;
+        if(frames % 10) {
+            printf("[FPS] : %f\n", 10.0f / (deltaTime));
+        }
+
+
         glfwPollEvents();
         glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+
+        if(mode == Mode::CPU) {
+            for(int y = 0; y < IMAGE_HEIGHT; y++){
+                for(int x = 0; x < IMAGE_WIDTH; x++) {
+                    int index = IMAGE_WIDTH * y + x;
+                    imageCPU[index] = make_uchar4(
+                        rand() % 256,
+                        rand() % 256,
+                        rand() % 256,
+                        255
+                    );
+                }
+            }
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
+        } else if (mode == Mode::CUDA) {
+            dim3 blocks(IMAGE_WIDTH / 16, IMAGE_HEIGHT / 16);
+            dim3 threads(16, 16);
+            generateRandomImage<<<blocks, threads>>>(imageCUDA, IMAGE_WIDTH, IMAGE_HEIGHT);
+            cudaMemcpy(imageCPU, imageCUDA, sizeof(uchar4) * IMAGE_WIDTH * IMAGE_HEIGHT, cudaMemcpyDeviceToHost);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
+        } else if (mode == Mode::CUDA_OPENGL) {
+            cudaGraphicsMapResources(1, &cudaResource, 0);
+            uchar4 *devPtr;
+            size_t size;
+            cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource);
+            dim3 blocks(IMAGE_WIDTH / 16, IMAGE_HEIGHT / 16);
+            dim3 threads(16, 16);
+            generateRandomImage<<<blocks, threads>>>(devPtr, IMAGE_WIDTH, IMAGE_HEIGHT);
+            cudaDeviceSynchronize();
+            cudaError_t error = cudaGetLastError();
+            if (error != cudaSuccess) {
+                std::cerr << "CUDA error: " << cudaGetErrorString(error) << std::endl;
+            }
+            cudaGraphicsUnmapResources(1, &cudaResource, 0);
+
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        }
+
+        glUseProgram(shaderProgram);
+        glBindVertexArray(vao);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+
         glfwSwapBuffers(window);
     }
 
-    if(mode == )
+    if(mode == Mode::CPU) {
+        delete[] imageCPU;
+    } else if (mode == Mode::CUDA) {
+        delete[] imageCPU;
+        cudaFree(imageCUDA);
+    } else if (mode == Mode::CUDA_OPENGL) {
+        glDeleteBuffers(1, &pbo);
+        cudaGraphicsUnregisterResource(cudaResource);
+    }
 
+
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+    glDeleteProgram(shaderProgram);
+    glDeleteBuffers(1, &vbo);
+    glDeleteBuffers(1, &vao);
 
     glfwTerminate();
 
