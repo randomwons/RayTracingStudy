@@ -86,11 +86,6 @@ int main(){
         printf("Faeild to initialize glfw : %s\n", desc);
         return EXIT_FAILURE;
     }
-
-    // TODO: I don't know why it doesn't work
-    // glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    // glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    // glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     
     auto window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_TITLE, nullptr, nullptr);
     if(!window) {
