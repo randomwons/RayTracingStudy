@@ -137,9 +137,9 @@ int main(int argc, char* argv[]){
     glLinkProgram(shaderProgram);
 
     float vertices[] = {
-        -0.5f, -0.5f, 0.0f, 0.0f, 0.0f,
-         0.5f, -0.5f, 0.0f, 1.0f, 0.0f,
-         0.0f,  0.5f, 0.0f, 0.5f, 1.0f
+        -1.0f, -1.0f, 0.0f, 0.0f, 0.0f,
+         1.0f, -1.0f, 0.0f, 1.0f, 0.0f,
+         0.0f,  1.0f, 0.0f, 0.5f, 1.0f
     };
 
     uint32_t vao, vbo;
@@ -191,8 +191,8 @@ int main(int argc, char* argv[]){
         deltaTime = currentFrameTime - lastFrameTime;
         lastFrameTime = currentFrameTime;
         frames++;
-        if(frames % 10) {
-            printf("[FPS] : %f\n", 10.0f / (deltaTime));
+        if(frames % 200) {
+            printf("[FPS] : %f\n", 1.f / (deltaTime));
         }
 
 
