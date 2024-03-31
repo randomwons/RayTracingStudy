@@ -137,12 +137,19 @@ int main(int argc, char* argv[]){
     glLinkProgram(shaderProgram);
 
     float vertices[] = {
-        -1.0f, -1.0f, 0.0f, 0.0f, 0.0f,
-         1.0f, -1.0f, 0.0f, 1.0f, 0.0f,
-         0.0f,  1.0f, 0.0f, 0.5f, 1.0f
+        // Position // Tex coords
+        -1.0f, -1.0f, 0.0f, 0.0f, 0.0f, // left-lower
+        -1.0f,  1.0f, 0.0f, 0.0f, 1.0f, // left-upper
+         1.0f, -1.0f, 0.0f, 1.0f, 0.0f, // right-lower
+         1.0f,  1.0f, 0.0f, 1.0f, 1.0f  // right-upper
     };
 
-    uint32_t vao, vbo;
+    uint32_t indices[] = {
+        0, 1, 2,
+        1, 2, 3
+    };
+
+    uint32_t vao, vbo, ebo;
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
 
@@ -153,15 +160,19 @@ int main(int argc, char* argv[]){
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), 0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+
+    glGenBuffers(1, &ebo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
     uint32_t texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMAGE_WIDTH, IMAGE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
     uchar4* imageCPU;
@@ -185,6 +196,9 @@ int main(int argc, char* argv[]){
     double lastFrameTime = 0;
     double currentFrameTime = 0;
     int frames = 0;
+    glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+
+    glDisable(GL_DEPTH_TEST);
     while(!glfwWindowShouldClose(window)){
 
         currentFrameTime = glfwGetTime();
@@ -215,7 +229,7 @@ int main(int argc, char* argv[]){
             glBindTexture(GL_TEXTURE_2D, texture);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
         } else if (mode == Mode::CUDA) {
-            dim3 blocks(IMAGE_WIDTH / 16, IMAGE_HEIGHT / 16);
+            dim3 blocks(IMAGE_WIDTH / 16 + 1, IMAGE_HEIGHT / 16 + 1);
             dim3 threads(16, 16);
             generateRandomImage<<<blocks, threads>>>(imageCUDA, IMAGE_WIDTH, IMAGE_HEIGHT);
             cudaMemcpy(imageCPU, imageCUDA, sizeof(uchar4) * IMAGE_WIDTH * IMAGE_HEIGHT, cudaMemcpyDeviceToHost);
@@ -226,7 +240,7 @@ int main(int argc, char* argv[]){
             uchar4 *devPtr;
             size_t size;
             cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource);
-            dim3 blocks(IMAGE_WIDTH / 16, IMAGE_HEIGHT / 16);
+            dim3 blocks(IMAGE_WIDTH / 16 + 1, IMAGE_HEIGHT / 16 + 1);
             dim3 threads(16, 16);
             generateRandomImage<<<blocks, threads>>>(devPtr, IMAGE_WIDTH, IMAGE_HEIGHT);
             cudaDeviceSynchronize();
@@ -243,7 +257,8 @@ int main(int argc, char* argv[]){
 
         glUseProgram(shaderProgram);
         glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        // glDrawArrays(GL_TRIANGLES, 0, 3);
 
         glfwSwapBuffers(window);
     }
