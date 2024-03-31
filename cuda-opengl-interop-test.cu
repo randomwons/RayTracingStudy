@@ -11,7 +11,7 @@ constexpr uint32_t WINDOW_WIDTH = 1280;
 constexpr uint32_t WINDOW_HEIGHT = 720;
 constexpr const char* WINDOW_TITLE = "CUDA-OpenGL Interop Test";
 
-// RANDOM IMAGE
+// RANDOM IMAGE SIZE
 constexpr uint32_t IMAGE_WIDTH = 1920;
 constexpr uint32_t IMAGE_HEIGHT = 1080;
 constexpr uint32_t IMAGE_CHANNEL = 4;
