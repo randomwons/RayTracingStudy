@@ -209,12 +209,14 @@ public:
             glBindTexture(GL_TEXTURE_2D, texture);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+            break;
         }
 
 
         glUseProgram(program);
         glBindVertexArray(vao);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
     }
 
 private:
@@ -233,6 +235,8 @@ private:
     dim3 threads;
     cudaGraphicsResource_t cudaResource;
     uint32_t pbo;
+
+    // bool resizing = false;
 
 };
 
