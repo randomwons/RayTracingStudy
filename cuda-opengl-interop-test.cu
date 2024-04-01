@@ -96,6 +96,7 @@ int main(int argc, char* argv[]){
         return EXIT_FAILURE;
     }
     glfwMakeContextCurrent(window);
+    glfwSwapInterval(0);
 
     if(!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         printf("Failed to initialize glad\n");
@@ -258,7 +259,6 @@ int main(int argc, char* argv[]){
         glUseProgram(shaderProgram);
         glBindVertexArray(vao);
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-        // glDrawArrays(GL_TRIANGLES, 0, 3);
 
         glfwSwapBuffers(window);
     }
