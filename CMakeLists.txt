@@ -14,7 +14,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC ${DEP_LIBS})
 add_dependencies(${PROJECT_NAME} ${DEP_LIST})
 
 add_executable(TEST
-    cuda-opengl-interop-test.cu
+    test_code/cuda-opengl-interop-test.cu
 )
 
 # include(Dependency.cmake)
