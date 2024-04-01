@@ -2,6 +2,7 @@
 #include <GLFW/glfw3.h>
 #include <iostream>
 #include <cstring>
+#include <memory>
 
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
@@ -57,6 +58,183 @@ enum Mode {
     CUDA_OPENGL
 };
 
+class Displayer {
+public:
+    Displayer(Mode mode) : mode(mode) {
+
+        int success;
+        uint32_t vertexShader = glCreateShader(GL_VERTEX_SHADER);
+        uint32_t fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+
+        glShaderSource(vertexShader, 1, &vertexShaderSource, nullptr);
+        glCompileShader(vertexShader);
+        glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+        if(!success){
+            char infoLog[1024];
+            glGetShaderInfoLog(vertexShader, 1024, nullptr, infoLog);
+            printf("Failed to compile vertex shader\n");
+            printf("reason : %s\n", infoLog);
+        }
+        glShaderSource(fragmentShader, 1, &fragmentShaderSource, nullptr);
+        glCompileShader(fragmentShader);
+        glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+        if(!success){
+            char infoLog[1024];
+            glGetShaderInfoLog(fragmentShader, 1024, nullptr, infoLog);
+            printf("Failed to compile vertex shader\n");
+            printf("reason : %s\n", infoLog);
+        }
+        program = glCreateProgram();
+        glAttachShader(program, vertexShader);
+        glAttachShader(program, fragmentShader);
+        glLinkProgram(program);
+
+        glDeleteShader(vertexShader);
+        glDeleteShader(fragmentShader);
+
+        float vertices[] = {
+            // Position // Tex coords
+            -1.0f, -1.0f, 0.0f, 0.0f, 0.0f, // left-lower
+            -1.0f,  1.0f, 0.0f, 0.0f, 1.0f, // left-upper
+             1.0f, -1.0f, 0.0f, 1.0f, 0.0f, // right-lower
+             1.0f,  1.0f, 0.0f, 1.0f, 1.0f  // right-upper
+        };
+
+        uint32_t indices[] = {
+            0, 1, 2,
+            1, 2, 3
+        };
+
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
+
+        glGenBuffers(1, &vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), 0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+
+        glGenBuffers(1, &ebo);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+        
+        uint32_t texture;
+        glGenTextures(1, &texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+
+        switch (mode) {
+        case Mode::CPU:
+            imageCPU = new uchar4[width * height];
+            break;
+        case Mode::CUDA:
+            imageCPU = new uchar4[width * height];
+            cudaMalloc((void**)&imageGPU, sizeof(uchar4) * width * height);
+            blocks = dim3(width / 16 + 1, height / 16 + 1);
+            threads = dim3(16, 16);
+            break;
+        case Mode::CUDA_OPENGL:
+            glGenBuffers(1, &pbo);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+            glBufferData(GL_PIXEL_UNPACK_BUFFER, width * height * IMAGE_CHANNEL, NULL, GL_DYNAMIC_COPY);
+            cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone);
+            blocks = dim3(width / 16 + 1, height / 16 + 1);
+            threads = dim3(16, 16);
+            break;
+        }
+    }
+    ~Displayer() {
+        glDeleteBuffers(1, &vao);
+        glDeleteBuffers(1, &vbo);
+        glDeleteBuffers(1, &ebo);
+        glDeleteProgram(program);
+
+        switch (mode) {
+        case Mode::CPU:
+            delete[] imageCPU;
+            break;
+        case Mode::CUDA:
+            delete[] imageCPU;
+            cudaFree(imageGPU);
+            break;
+        case Mode::CUDA_OPENGL:
+            glDeleteBuffers(1, &pbo);
+            cudaGraphicsUnregisterResource(cudaResource);
+            break;
+        }
+
+    }
+    void display() {
+
+        switch (mode) {
+        case Mode::CPU:
+            for(int y = 0; y < height; y++){
+                for(int x = 0; x < width; x++){
+                    int index = width * y + x;
+                    imageCPU[index] = make_uchar4(
+                        rand() % 256,
+                        rand() % 256,
+                        rand() % 256,
+                        255
+                    );
+                }
+            }
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
+            break;
+        case Mode::CUDA:
+            generateRandomImage<<<blocks, threads>>>(imageGPU, IMAGE_WIDTH, IMAGE_HEIGHT);
+            cudaMemcpy(imageCPU, imageGPU, sizeof(uchar4) * IMAGE_WIDTH * IMAGE_HEIGHT, cudaMemcpyDeviceToHost);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
+            break;
+        case Mode::CUDA_OPENGL:
+            cudaGraphicsMapResources(1, &cudaResource, 0);
+            uchar4 *devPtr;
+            size_t size;
+            cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource);
+            generateRandomImage<<<blocks, threads>>>(devPtr, IMAGE_WIDTH, IMAGE_HEIGHT);
+            cudaDeviceSynchronize();
+            cudaError_t error = cudaGetLastError();
+            if (error != cudaSuccess) {
+                std::cerr << "CUDA error: " << cudaGetErrorString(error) << std::endl;
+            }
+            cudaGraphicsUnmapResources(1, &cudaResource, 0);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        }
+
+
+        glUseProgram(program);
+        glBindVertexArray(vao);
+        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    }
+
+private:
+    uint32_t width { IMAGE_WIDTH };
+    uint32_t height { IMAGE_HEIGHT };
+
+    Mode mode;
+    uint32_t program;
+    uint32_t vao, vbo, ebo;
+    uint32_t texture;
+
+    uchar4* imageCPU;
+    uchar4* imageGPU;
+
+    dim3 blocks;
+    dim3 threads;
+    cudaGraphicsResource_t cudaResource;
+    uint32_t pbo;
+
+};
 
 int main(int argc, char* argv[]){
 
@@ -106,92 +284,7 @@ int main(int argc, char* argv[]){
     auto glVersion = glGetString(GL_VERSION);
     printf("OPENGL CONTEXT VERSION : %s\n", glVersion);
 
-    int success;
-    uint32_t vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    uint32_t fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-
-    glShaderSource(vertexShader, 1, &vertexShaderSource, nullptr);
-    glCompileShader(vertexShader);
-    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-    if(!success){
-        char infoLog[1024];
-        glGetShaderInfoLog(vertexShader, 1024, nullptr, infoLog);
-        printf("Failed to compile vertex shader\n");
-        printf("reason : %s\n", infoLog);
-        return EXIT_FAILURE;
-    }
-    glShaderSource(fragmentShader, 1, &fragmentShaderSource, nullptr);
-    glCompileShader(fragmentShader);
-    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-    if(!success){
-        char infoLog[1024];
-        glGetShaderInfoLog(fragmentShader, 1024, nullptr, infoLog);
-        printf("Failed to compile vertex shader\n");
-        printf("reason : %s\n", infoLog);
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
-
-    uint32_t shaderProgram = glCreateProgram();
-    glAttachShader(shaderProgram, vertexShader);
-    glAttachShader(shaderProgram, fragmentShader);
-    glLinkProgram(shaderProgram);
-
-    float vertices[] = {
-        // Position // Tex coords
-        -1.0f, -1.0f, 0.0f, 0.0f, 0.0f, // left-lower
-        -1.0f,  1.0f, 0.0f, 0.0f, 1.0f, // left-upper
-         1.0f, -1.0f, 0.0f, 1.0f, 0.0f, // right-lower
-         1.0f,  1.0f, 0.0f, 1.0f, 1.0f  // right-upper
-    };
-
-    uint32_t indices[] = {
-        0, 1, 2,
-        1, 2, 3
-    };
-
-    uint32_t vao, vbo, ebo;
-    glGenVertexArrays(1, &vao);
-    glBindVertexArray(vao);
-
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), 0);
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
-
-    glGenBuffers(1, &ebo);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-
-    uint32_t texture;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, IMAGE_WIDTH, IMAGE_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-
-    uchar4* imageCPU;
-    uchar4* imageCUDA;
-    cudaGraphicsResource *cudaResource;
-    uint32_t pbo;
-    
-    if(mode == Mode::CPU) {
-        imageCPU = new uchar4[IMAGE_WIDTH * IMAGE_HEIGHT];
-    } else if (mode == Mode::CUDA) {
-        imageCPU = new uchar4[IMAGE_WIDTH * IMAGE_HEIGHT];
-        cudaMalloc((void**)&imageCUDA, sizeof(uchar4) * IMAGE_WIDTH * IMAGE_HEIGHT);
-    } else if (mode == Mode::CUDA_OPENGL) {
-        glGenBuffers(1, &pbo);
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-        glBufferData(GL_PIXEL_UNPACK_BUFFER, IMAGE_WIDTH * IMAGE_HEIGHT * IMAGE_CHANNEL, NULL, GL_DYNAMIC_COPY);
-        cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone);
-    }
+    std::unique_ptr<Displayer> displayer = std::make_unique<Displayer>(mode);
 
     double deltaTime = 0;
     double lastFrameTime = 0;
@@ -215,70 +308,10 @@ int main(int argc, char* argv[]){
         glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        if(mode == Mode::CPU) {
-            for(int y = 0; y < IMAGE_HEIGHT; y++){
-                for(int x = 0; x < IMAGE_WIDTH; x++) {
-                    int index = IMAGE_WIDTH * y + x;
-                    imageCPU[index] = make_uchar4(
-                        rand() % 256,
-                        rand() % 256,
-                        rand() % 256,
-                        255
-                    );
-                }
-            }
-            glBindTexture(GL_TEXTURE_2D, texture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
-        } else if (mode == Mode::CUDA) {
-            dim3 blocks(IMAGE_WIDTH / 16 + 1, IMAGE_HEIGHT / 16 + 1);
-            dim3 threads(16, 16);
-            generateRandomImage<<<blocks, threads>>>(imageCUDA, IMAGE_WIDTH, IMAGE_HEIGHT);
-            cudaMemcpy(imageCPU, imageCUDA, sizeof(uchar4) * IMAGE_WIDTH * IMAGE_HEIGHT, cudaMemcpyDeviceToHost);
-            glBindTexture(GL_TEXTURE_2D, texture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
-        } else if (mode == Mode::CUDA_OPENGL) {
-            cudaGraphicsMapResources(1, &cudaResource, 0);
-            uchar4 *devPtr;
-            size_t size;
-            cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource);
-            dim3 blocks(IMAGE_WIDTH / 16 + 1, IMAGE_HEIGHT / 16 + 1);
-            dim3 threads(16, 16);
-            generateRandomImage<<<blocks, threads>>>(devPtr, IMAGE_WIDTH, IMAGE_HEIGHT);
-            cudaDeviceSynchronize();
-            cudaError_t error = cudaGetLastError();
-            if (error != cudaSuccess) {
-                std::cerr << "CUDA error: " << cudaGetErrorString(error) << std::endl;
-            }
-            cudaGraphicsUnmapResources(1, &cudaResource, 0);
-
-            glBindTexture(GL_TEXTURE_2D, texture);
-            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-        }
-
-        glUseProgram(shaderProgram);
-        glBindVertexArray(vao);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+        displayer->display();
 
         glfwSwapBuffers(window);
     }
-
-    if(mode == Mode::CPU) {
-        delete[] imageCPU;
-    } else if (mode == Mode::CUDA) {
-        delete[] imageCPU;
-        cudaFree(imageCUDA);
-    } else if (mode == Mode::CUDA_OPENGL) {
-        glDeleteBuffers(1, &pbo);
-        cudaGraphicsUnregisterResource(cudaResource);
-    }
-
-
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-    glDeleteProgram(shaderProgram);
-    glDeleteBuffers(1, &vbo);
-    glDeleteBuffers(1, &vao);
 
     glfwTerminate();
 
