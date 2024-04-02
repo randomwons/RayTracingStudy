@@ -11,11 +11,10 @@
 constexpr uint32_t WINDOW_WIDTH = 1280;
 constexpr uint32_t WINDOW_HEIGHT = 720;
 constexpr const char* WINDOW_TITLE = "CUDA-OpenGL Interop Test";
-
-// RANDOM IMAGE SIZE
-constexpr uint32_t IMAGE_WIDTH = 1920;
-constexpr uint32_t IMAGE_HEIGHT = 1080;
 constexpr uint32_t IMAGE_CHANNEL = 4;
+
+constexpr uint32_t BLOCK_DIM_X = 32;
+constexpr uint32_t BLOCK_DIM_Y = 32;
 
 const char* vertexShaderSource = 
     "#version 330 core\n"
@@ -136,16 +135,14 @@ public:
         case Mode::CUDA:
             imageCPU = new uchar4[width * height];
             cudaMalloc((void**)&imageGPU, sizeof(uchar4) * width * height);
-            blocks = dim3(width / 16 + 1, height / 16 + 1);
-            threads = dim3(16, 16);
+            gridLayout = dim3(width / BLOCK_DIM_X + 1, height / BLOCK_DIM_Y + 1);
             break;
         case Mode::CUDA_OPENGL:
             glGenBuffers(1, &pbo);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
             glBufferData(GL_PIXEL_UNPACK_BUFFER, width * height * IMAGE_CHANNEL, NULL, GL_DYNAMIC_COPY);
             cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone);
-            blocks = dim3(width / 16 + 1, height / 16 + 1);
-            threads = dim3(16, 16);
+            gridLayout = dim3(width / BLOCK_DIM_X + 1, height / BLOCK_DIM_Y + 1);
             break;
         }
     }
@@ -186,20 +183,21 @@ public:
                 }
             }
             glBindTexture(GL_TEXTURE_2D, texture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
             break;
         case Mode::CUDA:
-            generateRandomImage<<<blocks, threads>>>(imageGPU, IMAGE_WIDTH, IMAGE_HEIGHT);
-            cudaMemcpy(imageCPU, imageGPU, sizeof(uchar4) * IMAGE_WIDTH * IMAGE_HEIGHT, cudaMemcpyDeviceToHost);
+            generateRandomImage<<<gridLayout, blockLayout>>>(imageGPU, width, height);
+            cudaMemcpy(imageCPU, imageGPU, sizeof(uchar4) * width * height, cudaMemcpyDeviceToHost);
             glBindTexture(GL_TEXTURE_2D, texture);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
             break;
         case Mode::CUDA_OPENGL:
+            if(cudaResource == nullptr) return;
             cudaGraphicsMapResources(1, &cudaResource, 0);
             uchar4 *devPtr;
             size_t size;
             cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource);
-            generateRandomImage<<<blocks, threads>>>(devPtr, IMAGE_WIDTH, IMAGE_HEIGHT);
+            generateRandomImage<<<gridLayout, blockLayout>>>(devPtr, width, height);
             cudaDeviceSynchronize();
             cudaError_t error = cudaGetLastError();
             if (error != cudaSuccess) {
@@ -208,10 +206,9 @@ public:
             cudaGraphicsUnmapResources(1, &cudaResource, 0);
             glBindTexture(GL_TEXTURE_2D, texture);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
             break;
         }
-
 
         glUseProgram(program);
         glBindVertexArray(vao);
@@ -219,9 +216,47 @@ public:
 
     }
 
+    void resize(int width_, int height_) {
+
+        width = width_;
+        height = height_;
+
+        switch (mode) {
+        case Mode::CPU:
+            if(imageCPU != nullptr) {
+                delete[] imageCPU;
+                imageCPU = new uchar4[width_ * height_];
+            }
+            break;
+        case Mode::CUDA:
+            if(imageCPU != nullptr) {
+                delete[] imageCPU;
+                imageCPU = new uchar4[width_ * height_];
+            }
+            if(imageGPU != nullptr) {
+                cudaFree(imageGPU);
+                gridLayout = dim3(width / BLOCK_DIM_X + 1, height / BLOCK_DIM_Y + 1);
+                cudaMalloc((void**)&imageGPU, sizeof(uchar4) * width_ * height_);
+            }
+            break;
+        case Mode::CUDA_OPENGL:
+            
+            if(cudaResource != nullptr) {
+                glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+                glBufferData(GL_PIXEL_UNPACK_BUFFER, width_ * height_ * IMAGE_CHANNEL, NULL, GL_DYNAMIC_COPY);
+                gridLayout = dim3(width_ / BLOCK_DIM_X + 1, height_ / BLOCK_DIM_Y + 1);    
+                cudaGraphicsUnregisterResource(cudaResource);
+                cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone);
+            }
+            break;
+        }
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    }
+
 private:
-    uint32_t width { IMAGE_WIDTH };
-    uint32_t height { IMAGE_HEIGHT };
+    uint32_t width { WINDOW_WIDTH };
+    uint32_t height { WINDOW_HEIGHT };
 
     Mode mode;
     uint32_t program;
@@ -231,14 +266,21 @@ private:
     uchar4* imageCPU;
     uchar4* imageGPU;
 
-    dim3 blocks;
-    dim3 threads;
+    dim3 gridLayout;
+    dim3 blockLayout = dim3(BLOCK_DIM_X, BLOCK_DIM_Y);
     cudaGraphicsResource_t cudaResource;
     uint32_t pbo;
 
-    // bool resizing = false;
+    
 
 };
+
+void framebufferCallback(GLFWwindow* window, int width, int height){
+    auto displayer = reinterpret_cast<Displayer*>(glfwGetWindowUserPointer(window));
+    glViewport(0, 0, width, height);
+    if(displayer) displayer->resize(width, height);
+
+}
 
 int main(int argc, char* argv[]){
 
@@ -289,6 +331,8 @@ int main(int argc, char* argv[]){
     printf("OPENGL CONTEXT VERSION : %s\n", glVersion);
 
     std::unique_ptr<Displayer> displayer = std::make_unique<Displayer>(mode);
+    glfwSetWindowUserPointer(window, displayer.get());
+    glfwSetFramebufferSizeCallback(window, framebufferCallback);
 
     double deltaTime = 0;
     double lastFrameTime = 0;
