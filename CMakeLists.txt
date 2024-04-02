@@ -1,9 +1,16 @@
 cmake_minimum_required(VERSION 3.24)
 project(GL_TEST2 CXX CUDA)
 
+set(CMAKE_CXX_STANDARD 17)
+
 add_executable(${PROJECT_NAME}
-    main.cu
+    main.cpp include/common.h
+    src/window/window.cpp include/window/window.h
+    src/window/displayer.cu include/window/displayer.h
+
 )
+find_package(CUDA REQUIRED)
+include_directories("${CUDA_INCLUDE_DIRS}")
 
 include(Dependency.cmake)
 
