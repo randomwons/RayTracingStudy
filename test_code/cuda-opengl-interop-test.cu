@@ -8,8 +8,8 @@
 #include <cuda_gl_interop.h>
 #include <curand_kernel.h>
 
-constexpr uint32_t WINDOW_WIDTH = 1280;
-constexpr uint32_t WINDOW_HEIGHT = 720;
+constexpr uint32_t WINDOW_WIDTH = 120;
+constexpr uint32_t WINDOW_HEIGHT = 80;
 constexpr const char* WINDOW_TITLE = "CUDA-OpenGL Interop Test";
 constexpr uint32_t IMAGE_CHANNEL = 4;
 
@@ -107,6 +107,7 @@ public:
         glGenVertexArrays(1, &vao);
         glBindVertexArray(vao);
 
+        uint32_t vbo, ebo;
         glGenBuffers(1, &vbo);
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
         glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
@@ -119,15 +120,14 @@ public:
         glGenBuffers(1, &ebo);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
-        
-        uint32_t texture;
-        glGenTextures(1, &texture);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+        glDeleteBuffers(1, &vbo);
+        glDeleteBuffers(1, &ebo);
+        
+        printf("Bind off\n");
         switch (mode) {
         case Mode::CPU:
             imageCPU = new uchar4[width * height];
@@ -141,15 +141,23 @@ public:
             glGenBuffers(1, &pbo);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
             glBufferData(GL_PIXEL_UNPACK_BUFFER, width * height * IMAGE_CHANNEL, NULL, GL_DYNAMIC_COPY);
+            glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
             cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone);
             gridLayout = dim3(width / BLOCK_DIM_X + 1, height / BLOCK_DIM_Y + 1);
             break;
         }
+
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
     ~Displayer() {
         glDeleteBuffers(1, &vao);
-        glDeleteBuffers(1, &vbo);
-        glDeleteBuffers(1, &ebo);
         glDeleteProgram(program);
 
         switch (mode) {
@@ -165,9 +173,13 @@ public:
             cudaGraphicsUnregisterResource(cudaResource);
             break;
         }
+        glDeleteTextures(1, &texture);
 
     }
     void display() {
+
+        glUseProgram(program);
+        glBindVertexArray(vao);
 
         switch (mode) {
         case Mode::CPU:
@@ -192,7 +204,6 @@ public:
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, imageCPU);
             break;
         case Mode::CUDA_OPENGL:
-            if(cudaResource == nullptr) return;
             cudaGraphicsMapResources(1, &cudaResource, 0);
             uchar4 *devPtr;
             size_t size;
@@ -204,14 +215,12 @@ public:
                 std::cerr << "CUDA error: " << cudaGetErrorString(error) << std::endl;
             }
             cudaGraphicsUnmapResources(1, &cudaResource, 0);
-            glBindTexture(GL_TEXTURE_2D, texture);
             glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+            glBindTexture(GL_TEXTURE_2D, texture);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
             break;
         }
-
-        glUseProgram(program);
-        glBindVertexArray(vao);
+        
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
     }
@@ -260,7 +269,7 @@ private:
 
     Mode mode;
     uint32_t program;
-    uint32_t vao, vbo, ebo;
+    uint32_t vao;
     uint32_t texture;
 
     uchar4* imageCPU;
@@ -270,8 +279,6 @@ private:
     dim3 blockLayout = dim3(BLOCK_DIM_X, BLOCK_DIM_Y);
     cudaGraphicsResource_t cudaResource;
     uint32_t pbo;
-
-    
 
 };
 
@@ -285,7 +292,7 @@ void framebufferCallback(GLFWwindow* window, int width, int height){
 int main(int argc, char* argv[]){
 
     if(argc != 2) {
-        printf("Usage : mode <--cpu, --cuda, --cuda-opengl>\n");
+        printf("Usage : mode ( --cpu, --cuda, --cuda-opengl )\n");
         return EXIT_FAILURE;
     }
     
@@ -350,7 +357,6 @@ int main(int argc, char* argv[]){
         if(frames % 200) {
             printf("[FPS] : %f\n", 1.f / (deltaTime));
         }
-
 
         glfwPollEvents();
         glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
