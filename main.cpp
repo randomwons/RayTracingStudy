@@ -14,7 +14,7 @@ int main() {
         double deltaTime = currentTime - lastTime;
         lastTime = currentTime;
         if(frame % 200) {
-            printf("[FPS] : %f\n", 1.f / (deltaTime));
+            // printf("[FPS] : %f\n", 1.f / (deltaTime));
         }
 
         window->update();

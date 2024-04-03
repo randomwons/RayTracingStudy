@@ -3,28 +3,31 @@
 #include <curand_kernel.h>
 
 
-__global__ void generateRays(Ray* rays, int width, int height, float* intrinsic, float* extrinsic) {
+__global__ void generateRays(Ray* rays, int width, int height, glm::mat3* intrinsic, glm::mat4* extrinsic) {
 
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if(x >= width || y >= height) return;
 
-    float fx = intrinsic[0];
-    float fy = intrinsic[4];
-    float cx = intrinsic[2];
-    float cy = intrinsic[5];
+    glm::mat3 intrinsic_ = intrinsic[0];
+    glm::mat4 extrinsic_ = extrinsic[0];
+
+    float fx = intrinsic_[0][0];
+    float fy = intrinsic_[1][1];
+    float cx = intrinsic_[0][2];
+    float cy = intrinsic_[1][2];
 
     float dx = (x - cx) / fx;
     float dy = (y - cy) / fy;
     float dz = 1.0;
 
-    float worldDx = extrinsic[0] * dx + extrinsic[1] * dy + extrinsic[2] * dz + extrinsic[3];
-    float worldDy = extrinsic[4] * dx + extrinsic[5] * dy + extrinsic[6] * dz + extrinsic[7];
-    float worldDz = extrinsic[8] * dx + extrinsic[9] * dy + extrinsic[10] * dz + extrinsic[11];
+    float worldDx = extrinsic_[0][0] * dx + extrinsic_[0][1] * dy + extrinsic_[0][2] * dz + extrinsic_[0][3];
+    float worldDy = extrinsic_[1][0] * dx + extrinsic_[1][1] * dy + extrinsic_[1][2] * dz + extrinsic_[1][3];
+    float worldDz = extrinsic_[2][0] * dx + extrinsic_[2][1] * dy + extrinsic_[2][2] * dz + extrinsic_[2][3];
 
-    float worldOx = extrinsic[3];
-    float worldOy = extrinsic[7];
-    float worldOz = extrinsic[11];
+    float worldOx = extrinsic_[0][3];
+    float worldOy = extrinsic_[1][3];
+    float worldOz = extrinsic_[2][3];
 
     int index = y * width + x;
     rays[index].o = make_float3(worldOx, worldOy, worldOz);
@@ -39,11 +42,10 @@ __global__ void raytracing(Ray* rays, uchar4* data, int width, int height) {
     if(x >= width || y >= height) return;
 
     int pid = y * width + x;
-    float t = 0.5f * (rays[pid].d.y + 1.0f);
-
-    data[pid].x = static_cast<unsigned char>(__saturatef(1.0f - t + 0.5 * t) * 255.0f);
-    data[pid].y = static_cast<unsigned char>(__saturatef(1.0f - t + 0.7 * t) * 255.0f);
-    data[pid].z = static_cast<unsigned char>(__saturatef(1.0f - t + 1.0 * t) * 255.0f);
+    
+    data[pid].x = static_cast<unsigned char>(__saturatef(rays[pid].d.x) * 255.0f);
+    data[pid].y = static_cast<unsigned char>(__saturatef(rays[pid].d.y) * 255.0f);
+    data[pid].z = static_cast<unsigned char>(__saturatef(rays[pid].d.z) * 255.0f);
     data[pid].w = 255;
 }
 
@@ -148,30 +150,37 @@ Displayer::Displayer(const uint32_t width, const uint32_t height) : width(width)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    intrinsic[0] = 1000.;
-    intrinsic[1] = 0;
-    intrinsic[2] = width / 2.;
-    intrinsic[3] = 0;
-    intrinsic[4] = 1000.;
-    intrinsic[5] = height / 2.;
-    intrinsic[6] = 0;
-    intrinsic[7] = 0;
-    intrinsic[8] = 1;
+    intrinsic = glm::mat3(0.0f);
+    intrinsic[0][0] = 1000.;
+    intrinsic[1][1] = 1000.;
+    intrinsic[0][2] = width / 2.;
+    intrinsic[1][2] = height / 2.;
+    
+    extrinsic = glm::mat4(1.0f);
+    extrinsic[1][1] = -1.;
+    extrinsic[2][2] = -1.;
 
-    for(int i = 0; i < 4; i++){
-        for(int j = 0; j < 4; j++){
-            if (i == j) extrinsic[i * 4 + j] = 1.;
-            else extrinsic[i * 4 + j] = 0.;
-        }
-    }
     cudaMalloc((void**)&rays, sizeof(Ray) * width * height);
-    cudaMalloc((void**)&d_intrinsic, sizeof(float) * 9);
+    cudaMalloc((void**)&d_intrinsic, sizeof(glm::mat3));
     cudaMalloc((void**)&d_extrinsic, sizeof(float) * 16);
-    cudaMemcpy(d_intrinsic, intrinsic, sizeof(float) * 9, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_extrinsic, extrinsic, sizeof(float) * 16, cudaMemcpyHostToDevice);
 }
 
 void Displayer::display() {
+
+    m_cameraFront = 
+        glm::rotate(glm::mat4(1.0f), glm::radians(m_cameraYaw), glm::vec3(0.0f, 1.0f, 0.0f)) *
+        glm::rotate(glm::mat4(1.0f), glm::radians(m_cameraPitch), glm::vec3(1.0f, 0.0f, 0.0f)) *
+        glm::vec4(0.0f, 0.0f, -1.0f, 0.0f);
+    
+    auto view = glm::lookAt(
+        m_cameraPos,
+        m_cameraPos + m_cameraFront,
+        m_cameraUp);
+
+    auto viewInv = glm::inverse(view) * glm::mat4(1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1);
+
+    cudaMemcpy(d_intrinsic, (void*)&intrinsic, sizeof(glm::mat3), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_extrinsic, (void*)&viewInv, sizeof(glm::mat4), cudaMemcpyHostToDevice);
 
     glUseProgram(shaderProgram);
     glBindVertexArray(vao);

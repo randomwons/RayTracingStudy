@@ -48,6 +48,70 @@ public:
     void display();
     void resize(const uint32_t width_, const uint32_t height_);
 
+    void processInput(GLFWwindow* window) {
+        
+        const float cameraSpeed = 0.05f;
+        if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+            m_cameraPos += cameraSpeed * m_cameraFront;
+        }
+        if(glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+            m_cameraPos -= cameraSpeed * m_cameraFront;
+
+        auto cameraRight = glm::normalize(glm::cross(m_cameraUp, -m_cameraFront));
+        if(glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+            m_cameraPos += cameraSpeed * cameraRight;
+        if(glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+            m_cameraPos -= cameraSpeed * cameraRight;
+
+        auto cameraUp = glm::normalize(glm::cross(-m_cameraFront, cameraRight));
+        if(glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+            if(glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+                m_cameraPos -= cameraSpeed * cameraUp;
+            else
+                m_cameraPos += cameraSpeed * cameraUp;
+
+    }
+
+    void mouseButton(int button, int action, double x, double y){
+        if(button == GLFW_MOUSE_BUTTON_RIGHT) {
+            if(action == GLFW_PRESS) {
+                m_prevMousePos = glm::vec2((float)x, (float)y);
+                m_cameraControl = true;
+            }
+            else if (action == GLFW_RELEASE) {
+                m_cameraControl = false;
+            }
+        }
+    }
+
+    void mouseMove(double x, double y) {
+        if(!m_cameraControl) return;
+
+        auto pos = glm::vec2((float)x, (float)y);
+        auto deltaPos = pos - m_prevMousePos;
+
+        const float cameraRotSpped = 0.8f;
+        m_cameraYaw -= deltaPos.x * cameraRotSpped;
+        m_cameraPitch -= deltaPos.y * cameraRotSpped;
+        
+        if(m_cameraYaw < 0.0f) m_cameraYaw += 360.f;
+        if(m_cameraYaw > 360.0f) m_cameraYaw -= 360.0f;
+        if(m_cameraPitch > 89.0f) m_cameraPitch = 89.0f;
+        if(m_cameraPitch < -89.0f) m_cameraPitch = -89.0f;
+
+        m_prevMousePos = pos;
+    }
+
+    bool m_cameraControl { false };
+
+    float m_cameraPitch { 0.0f };
+    float m_cameraYaw { 0.0f };
+    glm::vec2 m_prevMousePos { glm::vec2(0.0f) };
+    glm::vec3 m_cameraPos { glm::vec3(0.0f, 0.0f, 3.0f) };
+    glm::vec3 m_cameraFront { glm::vec3(0.0f, 0.0f, -1.0f) };
+    glm::vec3 m_cameraUp { glm::vec3(0.0f, 1.0f, 0.0f) };
+    glm::mat4 extrinsic;
+
 private:
     uint32_t width;
     uint32_t height;
@@ -61,13 +125,16 @@ private:
     dim3 blockLayout = dim3(BLOCK_DIM_X, BLOCK_DIM_Y);
 
     Ray* rays;
-    float intrinsic[9];
-    float extrinsic[16];
 
-    float* d_intrinsic;
-    float* d_extrinsic;
+    // glm::mat4 extrinsic;
+    glm::mat4* d_extrinsic;
+
+    glm::mat3 intrinsic;
+    glm::mat3* d_intrinsic;
+
     float4* frame;
 
+    
 };
 
 #endif // __DISPLAYER_H__

@@ -15,10 +15,13 @@ CLASS_PTR(Window);
 class Window { 
 public:
     static WindowUPtr createWindow(const uint32_t width, const uint32_t height, const char* title);
-    ~Window() { glfwTerminate(); }
+    ~Window();
     bool shouldClose() const { return glfwWindowShouldClose(window); }
     void update();
     void resize(const uint32_t width, const uint32_t height);
+    void mouseMove(double x, double y) {if(displayer) displayer->mouseMove(x, y);}
+    void mouseButton(int button, int action, double x, double y) { if(displayer) displayer->mouseButton(button, action, x, y); }
+
 
 private:
     Window() {}
