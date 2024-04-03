@@ -35,9 +35,16 @@ static const char* fragShaderSource = R"glsl(
     }
 )glsl";
 
+struct Ray {
+
+    float3 o, d;
+
+};
+
 class Displayer {
 public:
     Displayer(const uint32_t width, const uint32_t height);
+    ~Displayer();
     void display();
     void resize(const uint32_t width_, const uint32_t height_);
 
@@ -53,7 +60,13 @@ private:
     dim3 gridLayout;
     dim3 blockLayout = dim3(BLOCK_DIM_X, BLOCK_DIM_Y);
 
-    
+    Ray* rays;
+    float intrinsic[9];
+    float extrinsic[16];
+
+    float* d_intrinsic;
+    float* d_extrinsic;
+    float4* frame;
 
 };
 

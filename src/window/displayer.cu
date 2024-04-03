@@ -2,7 +2,53 @@
 
 #include <curand_kernel.h>
 
+
+__global__ void generateRays(Ray* rays, int width, int height, float* intrinsic, float* extrinsic) {
+
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if(x >= width || y >= height) return;
+
+    float fx = intrinsic[0];
+    float fy = intrinsic[4];
+    float cx = intrinsic[2];
+    float cy = intrinsic[5];
+
+    float dx = (x - cx) / fx;
+    float dy = (y - cy) / fy;
+    float dz = 1.0;
+
+    float worldDx = extrinsic[0] * dx + extrinsic[1] * dy + extrinsic[2] * dz + extrinsic[3];
+    float worldDy = extrinsic[4] * dx + extrinsic[5] * dy + extrinsic[6] * dz + extrinsic[7];
+    float worldDz = extrinsic[8] * dx + extrinsic[9] * dy + extrinsic[10] * dz + extrinsic[11];
+
+    float worldOx = extrinsic[3];
+    float worldOy = extrinsic[7];
+    float worldOz = extrinsic[11];
+
+    int index = y * width + x;
+    rays[index].o = make_float3(worldOx, worldOy, worldOz);
+    rays[index].d = make_float3(worldDx, worldDy, worldDz);
+
+}
+
+__global__ void raytracing(Ray* rays, uchar4* data, int width, int height) {
+
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if(x >= width || y >= height) return;
+
+    int pid = y * width + x;
+    float t = 0.5f * (rays[pid].d.y + 1.0f);
+
+    data[pid].x = static_cast<unsigned char>(__saturatef(1.0f - t + 0.5 * t) * 255.0f);
+    data[pid].y = static_cast<unsigned char>(__saturatef(1.0f - t + 0.7 * t) * 255.0f);
+    data[pid].z = static_cast<unsigned char>(__saturatef(1.0f - t + 1.0 * t) * 255.0f);
+    data[pid].w = 255;
+}
+
 __global__ void generateRandomImage(uchar4* data, int width, int height) {
+
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
     if(x >= width || y >= height) return;
@@ -101,6 +147,28 @@ Displayer::Displayer(const uint32_t width, const uint32_t height) : width(width)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
+
+    intrinsic[0] = 1000.;
+    intrinsic[1] = 0;
+    intrinsic[2] = width / 2.;
+    intrinsic[3] = 0;
+    intrinsic[4] = 1000.;
+    intrinsic[5] = height / 2.;
+    intrinsic[6] = 0;
+    intrinsic[7] = 0;
+    intrinsic[8] = 1;
+
+    for(int i = 0; i < 4; i++){
+        for(int j = 0; j < 4; j++){
+            if (i == j) extrinsic[i * 4 + j] = 1.;
+            else extrinsic[i * 4 + j] = 0.;
+        }
+    }
+    cudaMalloc((void**)&rays, sizeof(Ray) * width * height);
+    cudaMalloc((void**)&d_intrinsic, sizeof(float) * 9);
+    cudaMalloc((void**)&d_extrinsic, sizeof(float) * 16);
+    cudaMemcpy(d_intrinsic, intrinsic, sizeof(float) * 9, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_extrinsic, extrinsic, sizeof(float) * 16, cudaMemcpyHostToDevice);
 }
 
 void Displayer::display() {
@@ -111,7 +179,8 @@ void Displayer::display() {
     uchar4 *devPtr;
     size_t size;
     cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource);
-    generateRandomImage<<<gridLayout, blockLayout>>>(devPtr, width, height);
+    generateRays<<<gridLayout, blockLayout>>>(rays, width, height, d_intrinsic, d_extrinsic);
+    raytracing<<<gridLayout, blockLayout>>>(rays, devPtr, width, height);
     cudaDeviceSynchronize();
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
@@ -136,7 +205,27 @@ void Displayer::resize(const uint32_t width_, const uint32_t height_) {
         cudaGraphicsUnregisterResource(cudaResource);
         cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone); 
         glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     }
     
+    if(rays != nullptr) {
+        cudaFree(rays);
+        cudaMalloc((void**)&rays, sizeof(Ray) * width_ * height_);
+    }
+    
+}
+
+Displayer::~Displayer() {
+
+    if(cudaResource != nullptr) cudaGraphicsUnregisterResource(cudaResource);
+    glDeleteBuffers(1, &pbo);
+    glDeleteVertexArrays(1, &vao);
+    glDeleteProgram(shaderProgram);
+    glDeleteTextures(1, &texture);
+    if(rays != nullptr) cudaFree(rays);
+    if(!d_intrinsic) cudaFree(d_intrinsic);
+    if(!d_extrinsic) cudaFree(d_extrinsic);
+    // if(!frame) cudaFree(frame);
+    
+
 }
