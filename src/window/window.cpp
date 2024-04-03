@@ -120,6 +120,9 @@ void Window::update() {
         ImGui::DragFloat3("camera pos", glm::value_ptr(displayer->m_cameraPos), 0.01f);
         ImGui::DragFloat("camera yaw", &displayer->m_cameraYaw, 0.5f);
         ImGui::DragFloat("camera pitch", &displayer->m_cameraPitch, 0.5f, -89.0f, 89.0f);
+        ImGui::DragFloat("view1", &displayer->view[0][3], 0.5f);
+        ImGui::DragFloat("view2", &displayer->view[1][3], 0.5f);
+        ImGui::DragFloat("view3", &displayer->view[2][3], 0.5f);
     }
     ImGui::End();
 

@@ -37,7 +37,7 @@ static const char* fragShaderSource = R"glsl(
 
 struct Ray {
 
-    float3 o, d;
+    glm::vec3 o, d;
 
 };
 
@@ -50,7 +50,7 @@ public:
 
     void processInput(GLFWwindow* window) {
         
-        const float cameraSpeed = 0.05f;
+        const float cameraSpeed = 0.01f;
         if(glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
             m_cameraPos += cameraSpeed * m_cameraFront;
         }
@@ -90,7 +90,7 @@ public:
         auto pos = glm::vec2((float)x, (float)y);
         auto deltaPos = pos - m_prevMousePos;
 
-        const float cameraRotSpped = 0.8f;
+        const float cameraRotSpped = 0.3f;
         m_cameraYaw -= deltaPos.x * cameraRotSpped;
         m_cameraPitch -= deltaPos.y * cameraRotSpped;
         
@@ -111,6 +111,7 @@ public:
     glm::vec3 m_cameraFront { glm::vec3(0.0f, 0.0f, -1.0f) };
     glm::vec3 m_cameraUp { glm::vec3(0.0f, 1.0f, 0.0f) };
     glm::mat4 extrinsic;
+    glm::mat4 view;
 
 private:
     uint32_t width;

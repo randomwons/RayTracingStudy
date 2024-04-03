@@ -13,8 +13,8 @@ int main() {
         double currentTime = glfwGetTime();
         double deltaTime = currentTime - lastTime;
         lastTime = currentTime;
-        if(frame % 200) {
-            // printf("[FPS] : %f\n", 1.f / (deltaTime));
+        if(frame % 300 == 0) {
+            printf("[FPS] : %f\n", 1.f / (deltaTime));
         }
 
         window->update();

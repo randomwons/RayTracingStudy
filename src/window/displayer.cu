@@ -2,6 +2,17 @@
 
 #include <curand_kernel.h>
 
+__device__ bool hit_sphere(glm::vec3& center, double radius, const Ray& r) {
+
+    glm::vec3 oc = r.o - center;
+    auto a = glm::dot(r.d, r.d);
+    auto b = 2.0 * dot(oc, r.d);
+    auto c = dot(oc, oc) - radius * radius;
+    auto discriminant = b*b - 4 * a * c;
+    return (discriminant >= 0); 
+
+}
+
 
 __global__ void generateRays(Ray* rays, int width, int height, glm::mat3* intrinsic, glm::mat4* extrinsic) {
 
@@ -18,20 +29,31 @@ __global__ void generateRays(Ray* rays, int width, int height, glm::mat3* intrin
     float cy = intrinsic_[1][2];
 
     float dx = (x - cx) / fx;
-    float dy = (y - cy) / fy;
-    float dz = 1.0;
+    float dy = -(y - cy) / fy;
+    float dz = -1.0;
+    float length = sqrt(dx * dx + dy * dy + dz * dz);
+    dx /= length;
+    dy /= length;
+    dz /= length;
 
-    float worldDx = extrinsic_[0][0] * dx + extrinsic_[0][1] * dy + extrinsic_[0][2] * dz + extrinsic_[0][3];
-    float worldDy = extrinsic_[1][0] * dx + extrinsic_[1][1] * dy + extrinsic_[1][2] * dz + extrinsic_[1][3];
-    float worldDz = extrinsic_[2][0] * dx + extrinsic_[2][1] * dy + extrinsic_[2][2] * dz + extrinsic_[2][3];
+    float worldDx = extrinsic_[0][0] * dx + extrinsic_[1][0] * dy + extrinsic_[2][0] * dz + extrinsic_[3][0];
+    float worldDy = extrinsic_[0][1] * dx + extrinsic_[1][1] * dy + extrinsic_[2][1] * dz + extrinsic_[3][1];
+    float worldDz = extrinsic_[0][2] * dx + extrinsic_[1][2] * dy + extrinsic_[2][2] * dz + extrinsic_[3][2];
+// 
+    // float worldOx = extrinsic_[3][0];
+    // float worldOy = extrinsic_[3][1];
+    // float worldOz = extrinsic_[3][2];
+    // float worldDx = extrinsic_[0][0] * dx + extrinsic_[1][0] * dy + extrinsic_[2][0] * dz + extrinsic_[3][0];
+    // float worldDy = extrinsic_[0][1] * dx + extrinsic_[1][1] * dy + extrinsic_[2][1] * dz + extrinsic_[3][1];
+    // float worldDz = extrinsic_[0][2] * dx + extrinsic_[1][2] * dy + extrinsic_[2][2] * dz + extrinsic_[3][2];
 
-    float worldOx = extrinsic_[0][3];
-    float worldOy = extrinsic_[1][3];
-    float worldOz = extrinsic_[2][3];
+    float worldOx = extrinsic_[3][0];
+    float worldOy = extrinsic_[3][1];
+    float worldOz = extrinsic_[3][2];
 
     int index = y * width + x;
-    rays[index].o = make_float3(worldOx, worldOy, worldOz);
-    rays[index].d = make_float3(worldDx, worldDy, worldDz);
+    rays[index].o = glm::vec3(worldOx, worldOy, worldOz);
+    rays[index].d = glm::vec3(worldDx, worldDy, worldDz);
 
 }
 
@@ -42,7 +64,11 @@ __global__ void raytracing(Ray* rays, uchar4* data, int width, int height) {
     if(x >= width || y >= height) return;
 
     int pid = y * width + x;
-    
+    if(hit_sphere(glm::vec3(0, 0, -0.5), 0.5, rays[pid])) {
+        data[pid] = make_uchar4(100, 200, 10, 255);
+        return;
+    }
+
     data[pid].x = static_cast<unsigned char>(__saturatef(rays[pid].d.x) * 255.0f);
     data[pid].y = static_cast<unsigned char>(__saturatef(rays[pid].d.y) * 255.0f);
     data[pid].z = static_cast<unsigned char>(__saturatef(rays[pid].d.z) * 255.0f);
@@ -156,9 +182,9 @@ Displayer::Displayer(const uint32_t width, const uint32_t height) : width(width)
     intrinsic[0][2] = width / 2.;
     intrinsic[1][2] = height / 2.;
     
-    extrinsic = glm::mat4(1.0f);
-    extrinsic[1][1] = -1.;
-    extrinsic[2][2] = -1.;
+    // extrinsic = glm::mat4(1.0f);
+    // extrinsic[1][1] = -1.;
+    // extrinsic[2][2] = -1.;
 
     cudaMalloc((void**)&rays, sizeof(Ray) * width * height);
     cudaMalloc((void**)&d_intrinsic, sizeof(glm::mat3));
@@ -172,15 +198,16 @@ void Displayer::display() {
         glm::rotate(glm::mat4(1.0f), glm::radians(m_cameraPitch), glm::vec3(1.0f, 0.0f, 0.0f)) *
         glm::vec4(0.0f, 0.0f, -1.0f, 0.0f);
     
-    auto view = glm::lookAt(
+    view = glm::lookAt(
         m_cameraPos,
         m_cameraPos + m_cameraFront,
         m_cameraUp);
-
-    auto viewInv = glm::inverse(view) * glm::mat4(1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1);
-
+    // auto viewInv = glm::transpose(view);
+    // view = glm::transpose(view);
+    // auto viewInv = glm::inverse(view) * glm::mat4(1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1);
+    auto viewInv = glm::inverse(view);
     cudaMemcpy(d_intrinsic, (void*)&intrinsic, sizeof(glm::mat3), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_extrinsic, (void*)&viewInv, sizeof(glm::mat4), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_extrinsic, (void*)&view, sizeof(glm::mat4), cudaMemcpyHostToDevice);
 
     glUseProgram(shaderProgram);
     glBindVertexArray(vao);
@@ -206,6 +233,11 @@ void Displayer::resize(const uint32_t width_, const uint32_t height_) {
 
     width = width_;
     height = height_;
+
+    intrinsic[0][2] = width_ / 2.;
+    intrinsic[1][2] = height_ / 2.;
+
+
 
     if(cudaResource != nullptr) {
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
