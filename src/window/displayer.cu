@@ -1,23 +1,25 @@
 #include "window/displayer.h"
-
 #include <curand_kernel.h>
+
+#define XCOORD blockDim.x * blockIdx.x + threadIdx.x;
+#define YCOORD blockDim.y * blockIdx.y + threadIdx.y;
 
 __device__ bool hit_sphere(glm::vec3& center, double radius, const Ray& r) {
 
     glm::vec3 oc = r.o - center;
     auto a = glm::dot(r.d, r.d);
-    auto b = 2.0 * dot(oc, r.d);
-    auto c = dot(oc, oc) - radius * radius;
-    auto discriminant = b*b - 4 * a * c;
-    return (discriminant >= 0); 
+    auto b = 2.0 * glm::dot(oc, r.d);
+    auto c = glm::dot(oc, oc) - radius*radius;
+    auto discriminant = b*b - 4*a*c;
+    return (discriminant >= 0);
 
 }
 
 
 __global__ void generateRays(Ray* rays, int width, int height, glm::mat3* intrinsic, glm::mat4* extrinsic) {
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int x = XCOORD;
+    int y = YCOORD;
     if(x >= width || y >= height) return;
 
     glm::mat3 intrinsic_ = intrinsic[0];
@@ -29,23 +31,16 @@ __global__ void generateRays(Ray* rays, int width, int height, glm::mat3* intrin
     float cy = intrinsic_[1][2];
 
     float dx = (x - cx) / fx;
-    float dy = -(y - cy) / fy;
-    float dz = -1.0;
+    float dy = (y - cy) / fy;
+    float dz = 1.0;
     float length = sqrt(dx * dx + dy * dy + dz * dz);
     dx /= length;
     dy /= length;
     dz /= length;
-
-    float worldDx = extrinsic_[0][0] * dx + extrinsic_[1][0] * dy + extrinsic_[2][0] * dz + extrinsic_[3][0];
-    float worldDy = extrinsic_[0][1] * dx + extrinsic_[1][1] * dy + extrinsic_[2][1] * dz + extrinsic_[3][1];
-    float worldDz = extrinsic_[0][2] * dx + extrinsic_[1][2] * dy + extrinsic_[2][2] * dz + extrinsic_[3][2];
-// 
-    // float worldOx = extrinsic_[3][0];
-    // float worldOy = extrinsic_[3][1];
-    // float worldOz = extrinsic_[3][2];
-    // float worldDx = extrinsic_[0][0] * dx + extrinsic_[1][0] * dy + extrinsic_[2][0] * dz + extrinsic_[3][0];
-    // float worldDy = extrinsic_[0][1] * dx + extrinsic_[1][1] * dy + extrinsic_[2][1] * dz + extrinsic_[3][1];
-    // float worldDz = extrinsic_[0][2] * dx + extrinsic_[1][2] * dy + extrinsic_[2][2] * dz + extrinsic_[3][2];
+    
+    float worldDx = extrinsic_[0][0] * dx + extrinsic_[1][0] * dy + extrinsic_[2][0] * dz;
+    float worldDy = extrinsic_[0][1] * dx + extrinsic_[1][1] * dy + extrinsic_[2][1] * dz;
+    float worldDz = extrinsic_[0][2] * dx + extrinsic_[1][2] * dy + extrinsic_[2][2] * dz;
 
     float worldOx = extrinsic_[3][0];
     float worldOy = extrinsic_[3][1];
@@ -59,12 +54,16 @@ __global__ void generateRays(Ray* rays, int width, int height, glm::mat3* intrin
 
 __global__ void raytracing(Ray* rays, uchar4* data, int width, int height) {
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int x = XCOORD;
+    int y = YCOORD;
     if(x >= width || y >= height) return;
 
     int pid = y * width + x;
-    if(hit_sphere(glm::vec3(0, 0, -0.5), 0.5, rays[pid])) {
+    if(hit_sphere(glm::vec3(0, 0, -1), 0.5, rays[pid])) {
+        data[pid] = make_uchar4(100, 200, 10, 255);
+        return;
+    }
+    if(hit_sphere(glm::vec3(1, 0, -1), 0.5, rays[pid])) {
         data[pid] = make_uchar4(100, 200, 10, 255);
         return;
     }
@@ -77,8 +76,8 @@ __global__ void raytracing(Ray* rays, uchar4* data, int width, int height) {
 
 __global__ void generateRandomImage(uchar4* data, int width, int height) {
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int x = XCOORD;
+    int y = YCOORD;
     if(x >= width || y >= height) return;
 
     int pid = y * width + x;
@@ -128,10 +127,10 @@ Displayer::Displayer(const uint32_t width, const uint32_t height) : width(width)
 
     float vertices[] = {
         // Position // Tex coords
-        -1.0f, -1.0f, 0.0f, 0.0f, 0.0f, // left-lower
-        -1.0f,  1.0f, 0.0f, 0.0f, 1.0f, // left-upper
-         1.0f, -1.0f, 0.0f, 1.0f, 0.0f, // right-lower
-         1.0f,  1.0f, 0.0f, 1.0f, 1.0f  // right-upper
+        -1.0f, -1.0f, 0.0f, 0.0f, 1.0f, // left-lower
+        -1.0f,  1.0f, 0.0f, 0.0f, 0.0f, // left-upper
+         1.0f, -1.0f, 0.0f, 1.0f, 1.0f, // right-lower
+         1.0f,  1.0f, 0.0f, 1.0f, 0.0f  // right-upper
     };
     uint32_t indices[] = {
         0, 1, 2,
@@ -181,14 +180,11 @@ Displayer::Displayer(const uint32_t width, const uint32_t height) : width(width)
     intrinsic[1][1] = 1000.;
     intrinsic[0][2] = width / 2.;
     intrinsic[1][2] = height / 2.;
-    
-    // extrinsic = glm::mat4(1.0f);
-    // extrinsic[1][1] = -1.;
-    // extrinsic[2][2] = -1.;
 
     cudaMalloc((void**)&rays, sizeof(Ray) * width * height);
     cudaMalloc((void**)&d_intrinsic, sizeof(glm::mat3));
     cudaMalloc((void**)&d_extrinsic, sizeof(float) * 16);
+    
 }
 
 void Displayer::display() {
@@ -197,15 +193,14 @@ void Displayer::display() {
         glm::rotate(glm::mat4(1.0f), glm::radians(m_cameraYaw), glm::vec3(0.0f, 1.0f, 0.0f)) *
         glm::rotate(glm::mat4(1.0f), glm::radians(m_cameraPitch), glm::vec3(1.0f, 0.0f, 0.0f)) *
         glm::vec4(0.0f, 0.0f, -1.0f, 0.0f);
-    
+
     view = glm::lookAt(
         m_cameraPos,
         m_cameraPos + m_cameraFront,
         m_cameraUp);
-    // auto viewInv = glm::transpose(view);
-    // view = glm::transpose(view);
-    // auto viewInv = glm::inverse(view) * glm::mat4(1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1);
-    auto viewInv = glm::inverse(view);
+
+    view = glm::inverse(view) * glm::mat4(1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+
     cudaMemcpy(d_intrinsic, (void*)&intrinsic, sizeof(glm::mat3), cudaMemcpyHostToDevice);
     cudaMemcpy(d_extrinsic, (void*)&view, sizeof(glm::mat4), cudaMemcpyHostToDevice);
 
@@ -236,8 +231,6 @@ void Displayer::resize(const uint32_t width_, const uint32_t height_) {
 
     intrinsic[0][2] = width_ / 2.;
     intrinsic[1][2] = height_ / 2.;
-
-
 
     if(cudaResource != nullptr) {
         glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);

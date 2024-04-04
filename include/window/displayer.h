@@ -111,7 +111,7 @@ public:
     glm::vec3 m_cameraFront { glm::vec3(0.0f, 0.0f, -1.0f) };
     glm::vec3 m_cameraUp { glm::vec3(0.0f, 1.0f, 0.0f) };
     glm::mat4 extrinsic;
-    glm::mat4 view;
+    glm::mat4 view { glm::mat4(1.0f) };
 
 private:
     uint32_t width;
