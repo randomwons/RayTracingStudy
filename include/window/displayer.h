@@ -6,40 +6,9 @@
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
 #include "device_launch_parameters.h"
-
-constexpr uint32_t BLOCK_DIM_X = 32;
-constexpr uint32_t BLOCK_DIM_Y = 32;
-
-static const char* vertShaderSource = R"glsl(
-    #version 330 core
-    layout (location = 0) in vec3 aPos;
-    layout (location = 1) in vec2 aTexCoord;
-
-    out vec2 TexCoord;
-
-    void main() {
-        gl_Position = vec4(aPos, 1.0);
-        TexCoord = aTexCoord;
-    }
-)glsl";
-
-static const char* fragShaderSource = R"glsl(
-    #version 330 core
-    out vec4 fragColor;
-    in vec2 TexCoord;
-
-    uniform sampler2D texture1;
-
-    void main() {
-        fragColor = texture(texture1, TexCoord);
-    }
-)glsl";
-
-struct Ray {
-
-    glm::vec3 o, d;
-
-};
+#include "shader/shader.h"
+#include "shader/program.h"
+#include "renderer.cuh"
 
 class Displayer {
 public:
@@ -114,26 +83,17 @@ public:
     glm::mat4 view { glm::mat4(1.0f) };
 
 private:
+    KernelRendererUPtr renderer;
+
     uint32_t width;
     uint32_t height;
     uint32_t shaderProgram;
     uint32_t vao;
-    uint32_t pbo;
-    uint32_t texture;
-    cudaGraphicsResource_t cudaResource;
 
     dim3 gridLayout;
     dim3 blockLayout = dim3(BLOCK_DIM_X, BLOCK_DIM_Y);
 
-    Ray* rays;
-
-    // glm::mat4 extrinsic;
-    glm::mat4* d_extrinsic;
-
-    glm::mat3 intrinsic;
-    glm::mat3* d_intrinsic;
-
-    float4* frame;
+    ProgramUPtr program;
 
     
 };

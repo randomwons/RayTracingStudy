@@ -7,7 +7,10 @@ add_executable(${PROJECT_NAME}
     main.cpp include/common.h
     src/window/window.cpp include/window/window.h
     src/window/displayer.cu include/window/displayer.h
-
+    src/shader/shader.cpp include/shader/shader.h
+    src/shader/program.cpp include/shader/program.h
+    src/buffer/GPUbuffer.cpp include/buffer/GPUbuffer.h
+    include/renderer.cuh src/renderer.cu
 )
 find_package(CUDA REQUIRED)
 include_directories("${CUDA_INCLUDE_DIRS}")

@@ -58,7 +58,6 @@ WindowUPtr Window::createWindow(const uint32_t width, const uint32_t height, con
     return std::move(window_);
 }
 
-
 Status Window::create(const uint32_t width, const uint32_t height, const char* title) {
 
     if(!glfwInit()) return Status::FAIL_GLFW;
@@ -80,12 +79,7 @@ Status Window::create(const uint32_t width, const uint32_t height, const char* t
     auto glVersion = glGetString(GL_VERSION);
     printf("OpenGL Context Version : %s\n", glVersion);
 
-    IMGUI_CHECKVERSION();
-    auto imguiContext = ImGui::CreateContext();
-    ImGui_ImplGlfw_InitForOpenGL(window, false);
-    ImGui_ImplOpenGL3_Init();
-    ImGui_ImplOpenGL3_CreateFontsTexture();
-    ImGui_ImplOpenGL3_CreateDeviceObjects();
+    initImGui();
 
     glfwSetWindowUserPointer(window, this);
     glfwSetFramebufferSizeCallback(window, framebuffer_callback);
@@ -94,7 +88,6 @@ Status Window::create(const uint32_t width, const uint32_t height, const char* t
     glfwSetCharCallback(window, OnCharEvent);
     glfwSetScrollCallback(window, OnScroll);
     glfwSetMouseButtonCallback(window, OnMouseButton);
-
     glfwSwapInterval(0);
 
     displayer = std::make_unique<Displayer>(width, height);
@@ -103,32 +96,15 @@ Status Window::create(const uint32_t width, const uint32_t height, const char* t
 }
 
 void Window::update() {
-    glfwPollEvents();
 
-    glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-
+    timeUpdate();
+    beginFrame();
     displayer->processInput(window);
     displayer->display();
-
-    // ImGui::Begin("Ui window");
-    if(ImGui::Begin("ui window")) {
-        ImGui::DragFloat3("camera pos", glm::value_ptr(displayer->m_cameraPos), 0.01f);
-        ImGui::DragFloat("camera yaw", &displayer->m_cameraYaw, 0.5f);
-        ImGui::DragFloat("camera pitch", &displayer->m_cameraPitch, 0.5f, -89.0f, 89.0f);
-        ImGui::DragFloat("view1", &displayer->view[3][0], 0.5f);
-        ImGui::DragFloat("view2", &displayer->view[3][1], 0.5f);
-        ImGui::DragFloat("view3", &displayer->view[3][2], 0.5f);
-    }
-    ImGui::End();
-
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    renderImGui();
     glfwSwapBuffers(window);
+    n_frames++;
+    
 }
 
 void Window::resize(const uint32_t width_, const uint32_t height_) {
@@ -144,8 +120,51 @@ Window::~Window() {
     ImGui_ImplOpenGL3_DestroyFontsTexture();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
-    // ImGui::DestroyContext(imguiContext);
-    
     glfwTerminate();
+
+}
+
+void Window::beginFrame() {
+    glfwPollEvents();
+    glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+}
+
+void Window::renderImGui() {
+
+    if(ImGui::Begin("ui window")) {
+        ImGui::Text("Elapsed Time %f", elapsedTime);
+        ImGui::Text("FPS %f", FPS);
+        ImGui::Text("frames %d", n_frames);
+        ImGui::DragFloat3("camera pos", glm::value_ptr(displayer->m_cameraPos), 0.01f);
+        ImGui::DragFloat("camera yaw", &displayer->m_cameraYaw, 0.5f);
+        ImGui::DragFloat("camera pitch", &displayer->m_cameraPitch, 0.5f, -89.0f, 89.0f);
+    }
+    ImGui::End();
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+void Window::initImGui() {
+
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGui_ImplGlfw_InitForOpenGL(window, false);
+    ImGui_ImplOpenGL3_Init();
+    ImGui_ImplOpenGL3_CreateFontsTexture();
+    ImGui_ImplOpenGL3_CreateDeviceObjects();
+
+}
+
+void Window::timeUpdate() {
+
+    elapsedTime = glfwGetTime();
+    deltaTime = elapsedTime - lastTime;
+    lastTime = elapsedTime;
+    FPS = 1.f / deltaTime;
 
 }

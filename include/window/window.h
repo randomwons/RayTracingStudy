@@ -22,14 +22,26 @@ public:
     void mouseMove(double x, double y) {if(displayer) displayer->mouseMove(x, y);}
     void mouseButton(int button, int action, double x, double y) { if(displayer) displayer->mouseButton(button, action, x, y); }
 
-
 private:
     Window() {}
     Status create(const uint32_t width, const uint32_t height, const char* title);  
+    
+    void beginFrame();
+    void timeUpdate();
+
+    void initImGui();
+    void renderImGui();
+
+
 
     std::unique_ptr<Displayer> displayer;
     GLFWwindow* window;
-    // uint32_t width, height;
+    
+    double elapsedTime { 0 };
+    double lastTime { 0 };
+    double deltaTime { 1 };
+    int n_frames { 0 };
+    double FPS { 0 };
 
 };
 
