@@ -47,27 +47,35 @@
 
 // }
 
-// __global__ void raytracing(Ray* rays, uchar4* data, int width, int height) {
+__global__ void raytracing(thrust::device_ptr<Camera*> camera, uchar4* data, int width, int height) {
 
-//     int x = XCOORD;
-//     int y = YCOORD;
-//     if(x >= width || y >= height) return;
+    int x = XCOORD;
+    int y = YCOORD;
+    if(x >= width || y >= height) return;
 
-//     int pid = y * width + x;
-//     if(hit_sphere(glm::vec3(0, 0, -1), 0.5, rays[pid])) {
-//         data[pid] = make_uchar4(100, 200, 10, 255);
-//         return;
-//     }
-//     if(hit_sphere(glm::vec3(1, 0, -1), 0.5, rays[pid])) {
-//         data[pid] = make_uchar4(100, 200, 10, 255);
-//         return;
-//     }
+    int pid = y * width + x;
+    Ray ray = ((Camera*)(*camera))->getRay(x, y);
 
-//     data[pid].x = static_cast<unsigned char>(__saturatef(rays[pid].d.x) * 255.0f);
-//     data[pid].y = static_cast<unsigned char>(__saturatef(rays[pid].d.y) * 255.0f);
-//     data[pid].z = static_cast<unsigned char>(__saturatef(rays[pid].d.z) * 255.0f);
-//     data[pid].w = 255;
-// }
+    data[pid].x = static_cast<unsigned char>(__saturatef(ray.direction.x) * 255.0f);
+    data[pid].y = static_cast<unsigned char>(__saturatef(ray.direction.y) * 255.0f);
+    data[pid].z = static_cast<unsigned char>(__saturatef(ray.direction.z) * 255.0f);
+    data[pid].w = 255;
+}
+
+__global__ void setCamera(thrust::device_ptr<Camera*> camera) {
+    if(threadIdx.x != 0) return;
+
+    glm::mat3 intrinsic = glm::mat3(1000., 0, 640, 0, 1000, 340, 0, 0, 1);
+
+    *camera = new Camera(intrinsic, glm::mat4(1.0f));
+
+}
+
+__global__ void setCameraPosition(thrust::device_ptr<Camera*> camera, glm::mat4 pose) {
+    if(threadIdx.x != 0) return;
+    
+    ((Camera*)(*camera))->setPosition(pose);   
+}
 
 __global__ void generateRandomImage(uchar4* data, int width, int height) {
 
@@ -86,25 +94,18 @@ __global__ void generateRandomImage(uchar4* data, int width, int height) {
     );
 }
 
-KernelRenderer::KernelRenderer(int width, int height) : width(width), height(height) {
+void KernelRenderer::setPosition(glm::mat4 pose) {
+    setCameraPosition<<<1, 1>>>(d_camera, pose);
+}
+
+
+KernelRenderer::KernelRenderer(cudaGraphicsResource_t cudaResource, int width, int height) 
+    : cudaResource(cudaResource), width(width), height(height) {
 
     gridLayout = dim3(width / BLOCK_DIM_X + 1, height / BLOCK_DIM_Y + 1);
 
-    glGenBuffers(1, &pbo);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glBufferData(GL_PIXEL_UNPACK_BUFFER, width * height * 4, NULL, GL_DYNAMIC_COPY);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone);
-    
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    cudaMalloc((void**)&rays, sizeof(Ray) * width * height);
+    d_camera = thrust::device_new<Camera*>();
+    setCamera<<<1, 1>>>(d_camera);
 
 }
 
@@ -114,11 +115,9 @@ void KernelRenderer::render() {
     uchar4 *devPtr;
     size_t size;
     cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource);
-    generateRandomImage<<<gridLayout, blockLayout>>>(devPtr, width, height);
+    raytracing<<<gridLayout, blockLayout>>>(d_camera, devPtr, width, height);
+    // generateRandomImage<<<gridLayout, blockLayout>>>(devPtr, width, height);
     cudaGraphicsUnmapResources(1, &cudaResource, 0);
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 
 }
 
@@ -126,30 +125,31 @@ void KernelRenderer::resize(int width_, int height_) {
 
     width = width_;
     height = height_;
-
-    if(cudaResource != nullptr) {
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
-        glBufferData(GL_PIXEL_UNPACK_BUFFER, width_ * height_ * 4, NULL, GL_DYNAMIC_COPY);
-        gridLayout = dim3(width_ / BLOCK_DIM_X + 1, height_ / BLOCK_DIM_Y + 1);    
-        cudaGraphicsUnregisterResource(cudaResource);
-        cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone); 
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    }
-    if(rays != nullptr){
-        cudaFree(rays);
-        cudaMalloc((void**)&rays, sizeof(Ray) * width * height);
-    }
+    gridLayout = dim3(width / BLOCK_DIM_X + 1, height / BLOCK_DIM_Y + 1);
+    // if(cudaResource != nullptr) {
+    //     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
+    //     glBufferData(GL_PIXEL_UNPACK_BUFFER, width_ * height_ * 4, NULL, GL_DYNAMIC_COPY);
+    //     gridLayout = dim3(width_ / BLOCK_DIM_X + 1, height_ / BLOCK_DIM_Y + 1);    
+    //     cudaGraphicsUnregisterResource(cudaResource);
+    //     cudaGraphicsGLRegisterBuffer(&cudaResource, pbo, cudaGraphicsRegisterFlagsNone); 
+    //     glBindTexture(GL_TEXTURE_2D, texture);
+    //     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    // }
+    // if(rays != nullptr){
+    //     thrust::device_free(rays);
+    //     rays = thrust::device_new<Ray*>(width * height);
+    //     // cudaMalloc((void**)&rays, sizeof(Ray) * width * height);
+    // }
 
 }
 
 KernelRenderer::~KernelRenderer() {
-    if(!cudaResource){
-        cudaGraphicsUnregisterResource(cudaResource);
-    }
-    if(!rays) {
-        cudaFree(rays);
-    }
-    glDeleteBuffers(1, &pbo);
-    glDeleteTextures(1, &texture);
+    // if(!cudaResource){
+    //     cudaGraphicsUnregisterResource(cudaResource);
+    // }
+    // if(!rays) {
+    //     thrust::device_free(rays);
+    // }
+    // glDeleteBuffers(1, &pbo);
+    // glDeleteTextures(1, &texture);
 }

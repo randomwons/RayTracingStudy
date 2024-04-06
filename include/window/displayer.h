@@ -39,6 +39,19 @@ public:
             else
                 m_cameraPos += cameraSpeed * cameraUp;
 
+        m_cameraFront = 
+            glm::rotate(glm::mat4(1.0f), glm::radians(m_cameraYaw), glm::vec3(0.0f, 1.0f, 0.0f)) *
+            glm::rotate(glm::mat4(1.0f), glm::radians(m_cameraPitch), glm::vec3(1.0f, 0.0f, 0.0f)) *
+            glm::vec4(0.0f, 0.0f, -1.0f, 0.0f);
+
+        view = glm::lookAt(
+            m_cameraPos,
+            m_cameraPos + m_cameraFront,
+            m_cameraUp);
+
+        view = glm::inverse(view) * glm::mat4(1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+        renderer->setPosition(view);
+
     }
 
     void mouseButton(int button, int action, double x, double y){
@@ -85,10 +98,12 @@ public:
 private:
     KernelRendererUPtr renderer;
 
-    uint32_t width;
-    uint32_t height;
+    uint32_t width, height;
+    uint32_t vao, pbo;
     uint32_t shaderProgram;
-    uint32_t vao;
+    uint32_t texture;
+    
+    cudaGraphicsResource_t cudaResource;
 
     dim3 gridLayout;
     dim3 blockLayout = dim3(BLOCK_DIM_X, BLOCK_DIM_Y);

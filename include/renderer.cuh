@@ -8,38 +8,36 @@
 #include <cuda_gl_interop.h>
 #include <curand_kernel.h>
 
+#include <thrust/device_ptr.h>
+#include <thrust/device_new.h>
+#include <thrust/device_free.h>
+
+#include "camera.h"
+
 constexpr uint32_t BLOCK_DIM_X = 32;
 constexpr uint32_t BLOCK_DIM_Y = 32;
 
 #define XCOORD blockDim.x * blockIdx.x + threadIdx.x;
 #define YCOORD blockDim.y * blockIdx.y + threadIdx.y;
 
-struct Ray {
-
-    glm::vec3 o, d;
-
-};
-
 CLASS_PTR(KernelRenderer);
 class KernelRenderer {
 public:
     KernelRenderer() {}
     ~KernelRenderer();
-    KernelRenderer(int width, int height);
+    KernelRenderer(cudaGraphicsResource_t cudaResource, int width, int height);
     void render();
     void resize(int width, int height);
+    void setPosition(glm::mat4 pose);
+
+    cudaGraphicsResource_t cudaResource;
 
 private:
-    Ray* rays;
-    // glm::mat3 intrinsic;
-    // glm::mat4 extrinsic;
+    thrust::device_ptr<Camera*> d_camera;
 
     dim3 gridLayout;
     dim3 blockLayout = dim3(BLOCK_DIM_X, BLOCK_DIM_Y);
     uint32_t width, height;
-    uint32_t texture;
-    uint32_t pbo;
-    cudaGraphicsResource_t cudaResource;
 
 
 };

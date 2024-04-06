@@ -6,11 +6,12 @@ set(CMAKE_CXX_STANDARD 17)
 add_executable(${PROJECT_NAME}
     main.cpp include/common.h
     src/window/window.cpp include/window/window.h
-    src/window/displayer.cu include/window/displayer.h
+    src/window/displayer.cpp include/window/displayer.h
     src/shader/shader.cpp include/shader/shader.h
     src/shader/program.cpp include/shader/program.h
     src/buffer/GPUbuffer.cpp include/buffer/GPUbuffer.h
-    include/renderer.cuh src/renderer.cu
+    src/renderer.cu include/renderer.cuh
+    include/camera.h
 )
 find_package(CUDA REQUIRED)
 include_directories("${CUDA_INCLUDE_DIRS}")
