@@ -29,6 +29,7 @@ public:
     void render();
     void resize(int width, int height);
     void setPosition(glm::mat4 pose);
+    void setIntrinsic(glm::mat3 intrinsic);
 
     cudaGraphicsResource_t cudaResource;
 

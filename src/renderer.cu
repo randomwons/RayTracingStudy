@@ -1,15 +1,15 @@
 #include "renderer.cuh"
 
-// __device__ bool hit_sphere(glm::vec3& center, double radius, const Ray& r) {
+__device__ bool hit_sphere(glm::vec3& center, double radius, const Ray& r) {
 
-//     glm::vec3 oc = r.o - center;
-//     auto a = glm::dot(r.d, r.d);
-//     auto b = 2.0 * glm::dot(oc, r.d);
-//     auto c = glm::dot(oc, oc) - radius*radius;
-//     auto discriminant = b*b - 4*a*c;
-//     return (discriminant >= 0);
+    glm::vec3 oc = r.origin - center;
+    auto a = glm::dot(r.direction, r.direction);
+    auto b = 2.0 * glm::dot(oc, r.direction);
+    auto c = glm::dot(oc, oc) - radius*radius;
+    auto discriminant = b*b - 4*a*c;
+    return (discriminant >= 0);
 
-// }
+}
 
 // __global__ void generateRays(Ray* rays, int width, int height, glm::mat3* intrinsic, glm::mat4* extrinsic) {
 
@@ -54,7 +54,15 @@ __global__ void raytracing(thrust::device_ptr<Camera*> camera, uchar4* data, int
     if(x >= width || y >= height) return;
 
     int pid = y * width + x;
+
     Ray ray = ((Camera*)(*camera))->getRay(x, y);
+    if(hit_sphere(glm::vec3(0, 0, -2), 0.5, ray)) {
+        data[pid].x = 255;
+        data[pid].y = 0;
+        data[pid].z = 0;
+        data[pid].w = 255;
+        return;
+    }
 
     data[pid].x = static_cast<unsigned char>(__saturatef(ray.direction.x) * 255.0f);
     data[pid].y = static_cast<unsigned char>(__saturatef(ray.direction.y) * 255.0f);
@@ -77,6 +85,12 @@ __global__ void setCameraPosition(thrust::device_ptr<Camera*> camera, glm::mat4 
     ((Camera*)(*camera))->setPosition(pose);   
 }
 
+__global__ void setCameraIntrinsic(thrust::device_ptr<Camera*> camera, glm::mat3 intrinsic) {
+    if(threadIdx.x != 0) return;
+
+    ((Camera*)(*camera))->setIntrinsic(intrinsic);
+}
+
 __global__ void generateRandomImage(uchar4* data, int width, int height) {
 
     int x = XCOORD;
@@ -96,6 +110,10 @@ __global__ void generateRandomImage(uchar4* data, int width, int height) {
 
 void KernelRenderer::setPosition(glm::mat4 pose) {
     setCameraPosition<<<1, 1>>>(d_camera, pose);
+}
+
+void KernelRenderer::setIntrinsic(glm::mat3 intrinsic) {
+    setCameraIntrinsic<<<1, 1>>>(d_camera, intrinsic);
 }
 
 
@@ -126,6 +144,18 @@ void KernelRenderer::resize(int width_, int height_) {
     width = width_;
     height = height_;
     gridLayout = dim3(width / BLOCK_DIM_X + 1, height / BLOCK_DIM_Y + 1);
+    
+
+    glm::mat3 intrinsic = glm::mat3(1.0f);
+
+    double f = width / (2 * glm::tan(glm::radians(80.f) / 2));
+
+    intrinsic[0][0] = f;
+    intrinsic[1][1] = f;
+    intrinsic[0][2] = width / 2;
+    intrinsic[1][2] = height / 2;
+    setIntrinsic(intrinsic);
+
     // if(cudaResource != nullptr) {
     //     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo);
     //     glBufferData(GL_PIXEL_UNPACK_BUFFER, width_ * height_ * 4, NULL, GL_DYNAMIC_COPY);

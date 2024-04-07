@@ -45,6 +45,10 @@ public:
         rot = glm::mat3(pose_);
     }
 
+    __device__ void setIntrinsic(glm::mat3 intrinsic_) {
+        intrinsic = intrinsic_;
+    }
+
     // __device__ void setLookAt(glm::vec3 forward, glm::vec) {
 
     // }
