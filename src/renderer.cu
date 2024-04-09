@@ -2,53 +2,60 @@
 
 __device__ bool hit_sphere(glm::vec3& center, double radius, const Ray& r) {
 
-    glm::vec3 oc = r.origin - center;
-    auto a = glm::dot(r.direction, r.direction);
-    auto b = 2.0 * glm::dot(oc, r.direction);
-    auto c = glm::dot(oc, oc) - radius*radius;
-    auto discriminant = b*b - 4*a*c;
-    return (discriminant >= 0);
+    // glm::vec3 oc = r.origin - center;
+    // auto a = glm::dot(r.direction, r.direction);
+    // auto b = 2.0 * glm::dot(oc, r.direction);
+    // auto c = glm::dot(oc, oc) - radius*radius;
+    // auto discriminant = b*b - 4*a*c;
+    // return (discriminant >= 0);
+
+    double rayorix;
+    double rayoriy;
+    double rayoriz;
+
+    double rayInvDirx;
+    double rayInvDiry;
+    double rayInvDirz;
+    
+    glm::vec3 min(0, 0, 0);
+    glm::vec3 max(1.28, 1.28, 1.28);
+
+    if(r.direction.x < 0.0f){
+        rayorix = center.x * 2.0f - r.origin.x;
+        rayInvDirx = -(1 / r.direction.x);
+    } else {
+        rayorix = r.origin.x;
+        rayInvDirx = 1 / r.direction.x; 
+    }
+    if(r.direction.y < 0.0f){
+        rayoriy = center.y * 2.0f - r.origin.y;
+        rayInvDiry = -(1 / r.direction.y);
+    } else {
+        rayoriy = r.origin.y;
+        rayInvDiry = 1 / r.direction.y; 
+    }
+    if(r.direction.z < 0.0f){
+        rayoriz = center.z * 2.0f - r.origin.z;
+        rayInvDirz = -(1 / r.direction.z);
+    } else {
+        rayoriz = r.origin.z;
+        rayInvDirz = 1 / r.direction.z; 
+    }
+
+    const float tx0 = (min.x - rayorix) * rayInvDirx;
+    const float tx1 = (max.x - rayorix) * rayInvDirx;
+    const float ty0 = (min.y - rayoriy) * rayInvDiry;
+    const float ty1 = (max.y - rayoriy) * rayInvDiry;
+    const float tz0 = (min.z - rayoriz) * rayInvDirz;
+    const float tz1 = (max.z - rayoriz) * rayInvDirz;
+
+    if(fmaxf(fmaxf(tx0, ty0), tz0) < fminf(fminf(tx1, ty1), tz1)) return true;
+    return false;
 
 }
 
-// __global__ void generateRays(Ray* rays, int width, int height, glm::mat3* intrinsic, glm::mat4* extrinsic) {
-
-//     int x = XCOORD;
-//     int y = YCOORD;
-//     if(x >= width || y >= height) return;
-
-//     glm::mat3 intrinsic_ = intrinsic[0];
-//     glm::mat4 extrinsic_ = extrinsic[0];
-
-//     float fx = intrinsic_[0][0];
-//     float fy = intrinsic_[1][1];
-//     float cx = intrinsic_[0][2];
-//     float cy = intrinsic_[1][2];
-
-//     float dx = (x - cx) / fx;
-//     float dy = (y - cy) / fy;
-//     float dz = 1.0;
-//     float length = sqrt(dx * dx + dy * dy + dz * dz);
-//     dx /= length;
-//     dy /= length;
-//     dz /= length;
+__global__ void raytracing(thrust::device_ptr<Camera*> camera, thrust::device_ptr<Octree*> octree, uchar4* data, int width, int height) {
     
-//     float worldDx = extrinsic_[0][0] * dx + extrinsic_[1][0] * dy + extrinsic_[2][0] * dz;
-//     float worldDy = extrinsic_[0][1] * dx + extrinsic_[1][1] * dy + extrinsic_[2][1] * dz;
-//     float worldDz = extrinsic_[0][2] * dx + extrinsic_[1][2] * dy + extrinsic_[2][2] * dz;
-
-//     float worldOx = extrinsic_[3][0];
-//     float worldOy = extrinsic_[3][1];
-//     float worldOz = extrinsic_[3][2];
-
-//     int index = y * width + x;
-//     rays[index].o = glm::vec3(worldOx, worldOy, worldOz);
-//     rays[index].d = glm::vec3(worldDx, worldDy, worldDz);
-
-// }
-
-__global__ void raytracing(thrust::device_ptr<Camera*> camera, uchar4* data, int width, int height) {
-
     int x = XCOORD;
     int y = YCOORD;
     if(x >= width || y >= height) return;
@@ -56,15 +63,19 @@ __global__ void raytracing(thrust::device_ptr<Camera*> camera, uchar4* data, int
     int pid = y * width + x;
 
     Ray ray = ((Camera*)(*camera))->getRay(x, y);
-    if(hit_sphere(glm::vec3(0, 0, -2), 0.5, ray)) {
+    double value = ((Octree*)(*octree))->traverse(ray);
+
+    data[pid].x = (unsigned char)value;
+    // value = octree.traverse(ray, ..)
+    if(hit_sphere(glm::vec3(0.64, 0.64, 0.64), 0.5, ray)) {
         data[pid].x = 255;
-        data[pid].y = 0;
-        data[pid].z = 0;
+        data[pid].y = 255;
+        data[pid].z = 255;
         data[pid].w = 255;
         return;
     }
-
-    data[pid].x = static_cast<unsigned char>(__saturatef(ray.direction.x) * 255.0f);
+    
+    // data[pid].x = static_cast<unsigned char>(__saturatef(ray.direction.x) * 255.0f);
     data[pid].y = static_cast<unsigned char>(__saturatef(ray.direction.y) * 255.0f);
     data[pid].z = static_cast<unsigned char>(__saturatef(ray.direction.z) * 255.0f);
     data[pid].w = 255;
@@ -91,21 +102,10 @@ __global__ void setCameraIntrinsic(thrust::device_ptr<Camera*> camera, glm::mat3
     ((Camera*)(*camera))->setIntrinsic(intrinsic);
 }
 
-__global__ void generateRandomImage(uchar4* data, int width, int height) {
+__global__ void setOctreeKernel(thrust::device_ptr<Octree*> octree, glm::vec3 min, glm::vec3 max, float resolution) {
+    if(threadIdx.x != 0) return;
 
-    int x = XCOORD;
-    int y = YCOORD;
-    if(x >= width || y >= height) return;
-
-    int pid = y * width + x;
-    curandState state;
-    curand_init((unsigned long long)clock() + pid, 0, 0, &state);
-    data[pid] = make_uchar4(
-        curand_uniform(&state) * 255,
-        curand_uniform(&state) * 255,
-        curand_uniform(&state) * 255,
-        255
-    );
+    *octree = new Octree(min, max, resolution);
 }
 
 void KernelRenderer::setPosition(glm::mat4 pose) {
@@ -116,6 +116,10 @@ void KernelRenderer::setIntrinsic(glm::mat3 intrinsic) {
     setCameraIntrinsic<<<1, 1>>>(d_camera, intrinsic);
 }
 
+// void KernelRenderer::setOctree(glm::vec3 min, glm::vec3 max, float resolution) {
+//     setOctreeKernel<<<1, 1>>>(d_octree, min, max, resolution);
+// }
+
 
 KernelRenderer::KernelRenderer(cudaGraphicsResource_t cudaResource, int width, int height) 
     : cudaResource(cudaResource), width(width), height(height) {
@@ -125,6 +129,15 @@ KernelRenderer::KernelRenderer(cudaGraphicsResource_t cudaResource, int width, i
     d_camera = thrust::device_new<Camera*>();
     setCamera<<<1, 1>>>(d_camera);
 
+    d_octree = thrust::device_new<Octree*>();
+
+    glm::vec3 min = glm::vec3(0.0f);
+    glm::vec3 max = glm::vec3(1.28f);
+    float resolution = 0.01;
+
+    setOctreeKernel<<<1, 1>>>(d_octree, min, max, resolution); 
+
+
 }
 
 void KernelRenderer::render() {
@@ -133,7 +146,7 @@ void KernelRenderer::render() {
     uchar4 *devPtr;
     size_t size;
     cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, cudaResource);
-    raytracing<<<gridLayout, blockLayout>>>(d_camera, devPtr, width, height);
+    raytracing<<<gridLayout, blockLayout>>>(d_camera, d_octree, devPtr, width, height);
     // generateRandomImage<<<gridLayout, blockLayout>>>(devPtr, width, height);
     cudaGraphicsUnmapResources(1, &cudaResource, 0);
 

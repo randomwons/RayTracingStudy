@@ -13,6 +13,7 @@
 #include <thrust/device_free.h>
 
 #include "camera.h"
+#include "octree.h"
 
 constexpr uint32_t BLOCK_DIM_X = 32;
 constexpr uint32_t BLOCK_DIM_Y = 32;
@@ -31,10 +32,15 @@ public:
     void setPosition(glm::mat4 pose);
     void setIntrinsic(glm::mat3 intrinsic);
 
+    void setOctree(glm::vec3 min, glm::vec3 max, float resolution);
+
+
+
     cudaGraphicsResource_t cudaResource;
 
 private:
     thrust::device_ptr<Camera*> d_camera;
+    thrust::device_ptr<Octree*> d_octree;
 
     dim3 gridLayout;
     dim3 blockLayout = dim3(BLOCK_DIM_X, BLOCK_DIM_Y);
